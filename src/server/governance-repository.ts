@@ -25,6 +25,7 @@ interface AssignmentRow {
   role: ReviewAssignment['role'];
   org_agent_id: string;
   assigned_at: string;
+  review_deadline_at: string | null;
 }
 
 const mapAssignment = (row: AssignmentRow): ReviewAssignment => ({
@@ -34,6 +35,7 @@ const mapAssignment = (row: AssignmentRow): ReviewAssignment => ({
   role: row.role,
   orgAgentId: row.org_agent_id,
   assignedAt: row.assigned_at,
+  reviewDeadlineAt: row.review_deadline_at ?? null,
 });
 
 export interface GovernanceRepository {
@@ -531,17 +533,22 @@ export function createGovernanceRepository(connection: Database.Database): Gover
       // would let one reviewer unseal the gate by filing twice.
       const filedReviewerIds = [...new Set(current.map((review) => review.reviewerOrgAgentId))];
       const filedIds = new Set(filedReviewerIds);
-      const outstanding = connection
-        .prepare(
-          `SELECT MIN(review_deadline_at) AS deadline FROM review_assignments
-            WHERE card_id = ? AND gate_id = ? AND role = 'reviewer'
-              AND review_deadline_at IS NOT NULL`,
-        )
-        .get(cardId, gateId) as { deadline: string | null };
-      // Only a reviewer who has NOT filed can be the one holding the gate shut.
+      /*
+       * The deadline that can unseal the gate belongs to a reviewer who has NOT
+       * filed. Taking the minimum across every assignment let a stale deadline
+       * on somebody who had already filed open the seal while another reviewer
+       * was still working — the deadline unsealing the gate it exists to keep
+       * shut, which is the opposite of the rule.
+       */
       const stillOut = listReviewers(cardId, gateId)
         .filter((assignment) => !filedIds.has(assignment.orgAgentId));
-      const deadlineAt = stillOut.length === 0 ? null : outstanding.deadline;
+      const outstandingDeadlines = stillOut
+        .map((assignment) => assignment.reviewDeadlineAt)
+        .filter((deadline): deadline is string => deadline !== null);
+      // Every outstanding reviewer must be out of time, not merely one of them.
+      const deadlineAt = stillOut.length > 0 && outstandingDeadlines.length === stillOut.length
+        ? outstandingDeadlines.reduce((latest, deadline) => (deadline > latest ? deadline : latest))
+        : null;
       const now = new Date().toISOString();
 
       return current.filter((review) => reviewIsVisibleTo({

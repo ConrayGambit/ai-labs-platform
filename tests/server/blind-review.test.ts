@@ -198,6 +198,62 @@ describe('blind review, through the repository', () => {
       .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toEqual([]);
   });
 
+  // Found in review: the deadline was the minimum across EVERY assignment, so a
+  // stale deadline on a reviewer who had already filed unsealed the gate while
+  // another reviewer was still working.
+  it('IGNORES an expired deadline belonging to a reviewer who already filed', () => {
+    const { card, builder, reviewerA } = seed(2);
+    file(card.id, reviewerA.id);
+    database!.governance.setReviewDeadline({
+      cardId: card.id, gateId: 'G1', orgAgentId: reviewerA.id,
+      deadlineAt: '2000-01-01T00:00:00.000Z',
+    });
+
+    // Reviewer B is still out and has no deadline. Nothing unseals.
+    expect(database!.governance
+      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toEqual([]);
+  });
+
+  it('requires EVERY outstanding reviewer to be out of time, not merely one', () => {
+    database = createDatabase(':memory:');
+    const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
+    const venture = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'V', kind: 'research', mission: 'M.',
+    });
+    const project = database.platform.createProject({
+      ventureId: venture.id, name: 'P', objective: 'O.', successCriteria: ['C'],
+      reviewerCountOverride: 3,
+    });
+    const card = database.work.createCard({ projectId: project.id, title: 'T' });
+    const make = (name: string, model: string) => database!.createOrgAgent({
+      name, jobTitle: 'S', department: 'D', jobFunction: 'F', responsibilities: 'R',
+      runtimeId: database!.createAgent({
+        name: `rt-${model}`, command: `rt-${model}`, argsTemplate: ['{prompt}'],
+        promptTransport: 'argument', outputFormat: 'text',
+        versionArgs: ['--version'], timeoutMs: 120_000,
+      }).id,
+      model,
+    });
+    const builder = make('Builder', 'm1');
+    const first = make('A', 'm2');
+    const second = make('B', 'm3');
+    const third = make('C', 'm4');
+    for (const [role, agent] of [
+      ['builder', builder], ['reviewer', first], ['reviewer', second], ['reviewer', third],
+    ] as const) {
+      database.governance.assignRole({ cardId: card.id, gateId: 'G1', role, orgAgentId: agent.id });
+    }
+    file(card.id, first.id);
+    // Two still out; only one of them is out of time.
+    database.governance.setReviewDeadline({
+      cardId: card.id, gateId: 'G1', orgAgentId: second.id,
+      deadlineAt: '2000-01-01T00:00:00.000Z',
+    });
+
+    expect(database.governance
+      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toEqual([]);
+  });
+
   it('unseals once an outstanding reviewer deadline has passed', () => {
     const { card, builder, reviewerA, reviewerB } = seed(2);
     file(card.id, reviewerA.id);

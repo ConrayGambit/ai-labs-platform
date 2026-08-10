@@ -17,6 +17,8 @@ export interface ReviewAssignment {
   role: GovernanceRole;
   orgAgentId: string;
   assignedAt: string;
+  /** When this reviewer stops being able to hold the gate shut, or null. */
+  reviewDeadlineAt: string | null;
 }
 
 export interface AssignRoleInput {

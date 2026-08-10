@@ -15,6 +15,7 @@ import {
   type UpdateCardInput,
 } from '../shared/work.js';
 import { OWNER_USER_ID } from '../shared/identity.js';
+import { getLadder } from './gate-policy.js';
 
 interface CardRow {
   id: string;
@@ -354,7 +355,25 @@ export function createWorkRepository(connection: Database.Database): WorkReposit
 
     raiseReviewerCount(input) {
       return connection.transaction(() => {
-        requireCardRow(input.cardId);
+        const card = requireCardRow(input.cardId);
+        /*
+         * A raise may never lower. The policy already refuses a low value when
+         * the count is READ, but that is too late: the bad number is already
+         * stored, and every board read then throws instead of rendering. An
+         * override is checked against the strictest gate on the project's
+         * ladder, so no gate on it can be weakened.
+         */
+        const project = connection
+          .prepare('SELECT gate_ladder_id FROM platform_projects WHERE id = ?')
+          .get(card.project_id) as { gate_ladder_id: string | null } | undefined;
+        const strictest = getLadder(project?.gate_ladder_id ?? 'product').gates
+          .reduce((most, gate) => Math.max(most, gate.reviewerCount), 0);
+        if (input.count < strictest) {
+          throw new Error(
+            `Reviewer count may be raised but not lowered: this ladder requires at least ` +
+              `${strictest}, got ${input.count}`,
+          );
+        }
         if (!input.reason.trim()) {
           // The reason is the point. A raise with no reason cannot be looked
           // back on, which is the whole justification for recording it.

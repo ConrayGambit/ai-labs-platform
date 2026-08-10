@@ -186,6 +186,19 @@ describe('the card model, the owner notes and the activity log', () => {
     })).toBe(2);
   });
 
+  // Found in review: a lowering was accepted at write time and only refused
+  // when the count was READ, so a bad number made every board read throw.
+  it('REFUSES a reviewer raise that would LOWER the ladder requirement', () => {
+    database = createDatabase(':memory:');
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+
+    expect(() => database!.work.raiseReviewerCount({
+      cardId: card.id, count: 0, reason: 'Trying to lower it.', userId: 'owner',
+    })).toThrow(/raised but not lowered/i);
+    expect(database.work.getCard(card.id)?.reviewerCountOverride).toBeNull();
+  });
+
   it('REFUSES a reviewer raise with no reason recorded', () => {
     database = createDatabase(':memory:');
     const project = seedProject();
