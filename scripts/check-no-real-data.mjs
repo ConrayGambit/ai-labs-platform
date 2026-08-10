@@ -90,8 +90,8 @@ export function denylistCandidates(scriptDir, gitCommonDir) {
  * Off unless asked for. Every clone outside a deployment that carries real names
  * has no denylist and must still be able to run the generic rules — including
  * this repository's own continuous integration. A deployment that does keep one
- * turns this on, so a denylist that stops resolving becomes a failed check
- * instead of a quietly weaker one.
+ * turns this on, so a denylist that stops resolving, or that loses its terms,
+ * becomes a failed check instead of a quietly weaker one.
  *
  * @param {string[]} argv
  * @param {Record<string, string | undefined>} env
@@ -101,6 +101,32 @@ export function requiresDenylist(argv, env) {
   if (argv.includes('--require-denylist')) return true;
   const value = (env.AI_LABS_REQUIRE_DENYLIST ?? '').trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
+}
+
+/**
+ * Whether the denylist rule will actually run, and whether it not running should
+ * stop the check.
+ *
+ * A denylist that resolved to a real file but yielded no terms enforces exactly
+ * as much as no denylist at all. A truncated write, a clobbering redirect, or a
+ * file holding nothing but comments each leave the strongest rule inert while a
+ * path was still found. That is reported as its own state rather than folded
+ * into a missing one, because the two are corrected differently: one by finding
+ * the file, the other by looking at what is inside it.
+ *
+ * Being required is fatal for both, so the flag promises that the rule ran
+ * rather than merely that a file existed. The second is the weaker promise, and
+ * a check whose guarantee is "a file was present" is the kind that reports a
+ * clean repository right up until it matters.
+ *
+ * @param {string[]} terms
+ * @param {string | null} path denylist actually read, if any
+ * @param {boolean} required
+ * @returns {{state: 'active' | 'missing' | 'empty', fatal: boolean}}
+ */
+export function denylistVerdict(terms, path, required) {
+  if (terms.length > 0) return { state: 'active', fatal: false };
+  return { state: path ? 'empty' : 'missing', fatal: required };
 }
 
 const ALLOWED_ABSOLUTE_PREFIXES = ['c:\\program files', 'c:\\programdata', 'c:\\windows'];
@@ -306,16 +332,27 @@ function scanHistory(terms) {
  * read as reassurance for a check that never happened, which is how a worktree
  * went on reporting a clean tree with the denylist rule silently disabled.
  *
+ * @param {{state: 'missing' | 'empty', fatal: boolean}} verdict
+ * @param {string | null} path
  * @param {string[]} candidates
- * @param {boolean} required
  */
-function reportMissingDenylist(candidates, required) {
-  console.error('NO PRIVATE DENYLIST FOUND. The denylist rule did NOT run.');
-  console.error('  Generic rules ran: personal paths, absolute paths, emails, encoding.');
-  console.error('  Real names, were any present, would NOT have been detected.');
-  for (const candidate of candidates) console.error(`  Looked for: ${candidate}`);
-  console.error('  Name one with --denylist <path> or AI_LABS_DENYLIST.');
-  if (required) {
+function reportInactiveDenylist(verdict, path, candidates) {
+  if (verdict.state === 'empty') {
+    console.error(`PRIVATE DENYLIST HAS NO TERMS: ${path}`);
+    console.error('  It was found and read, and held no term: blank lines and comments only.');
+  } else {
+    console.error('NO PRIVATE DENYLIST FOUND.');
+    for (const candidate of candidates) console.error(`  Looked for: ${candidate}`);
+  }
+  console.error('  The denylist rule did NOT run. Generic rules ran: personal paths,');
+  console.error('  absolute paths, emails, encoding. Real names, were any present,');
+  console.error('  would NOT have been detected.');
+  console.error(
+    verdict.state === 'empty'
+      ? '  Put one lower-case term per line, or name another file with --denylist.'
+      : '  Name one with --denylist <path> or AI_LABS_DENYLIST.',
+  );
+  if (verdict.fatal) {
     console.error('\nA denylist was required (--require-denylist or AI_LABS_REQUIRE_DENYLIST),');
     console.error('so this check FAILED rather than running with a weaker rule set.');
     process.exit(1);
@@ -326,9 +363,12 @@ function reportMissingDenylist(candidates, required) {
 function main() {
   const { terms, path: denylistPath, candidates } = loadDenylist();
   const historyMode = process.argv.includes('--history');
-  if (!denylistPath) {
-    reportMissingDenylist(candidates, requiresDenylist(process.argv, process.env));
-  }
+  const verdict = denylistVerdict(
+    terms,
+    denylistPath,
+    requiresDenylist(process.argv, process.env),
+  );
+  if (verdict.state !== 'active') reportInactiveDenylist(verdict, denylistPath, candidates);
   const violations = [];
   if (historyMode) {
     violations.push(...scanHistory(terms));
@@ -349,9 +389,10 @@ function main() {
     );
     process.exit(1);
   }
-  const note = denylistPath
-    ? `${terms.length} private term(s)`
-    : 'GENERIC RULES ONLY - the denylist rule did not run';
+  const note =
+    verdict.state === 'active'
+      ? `${terms.length} private term(s)`
+      : 'GENERIC RULES ONLY - the denylist rule did not run';
   const scope = historyMode ? 'entire git history' : 'working tree';
   console.log(`Publishable-data check passed on the ${scope} (${note}).`);
 }
