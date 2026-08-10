@@ -26,8 +26,14 @@ jobs:
       - name: Rebuild native modules for this Node ABI
         run: npm rebuild better-sqlite3
 
-      - name: Publishable-data guard
+      - name: Publishable-data guard (working tree)
         run: npm run guard
+
+      # A file deleted from the working tree is still in history, and a public
+      # push publishes every commit. The working-tree scan cannot see that.
+      # Runs generic rules only: the private denylist is never available to CI.
+      - name: Publishable-data guard (full history)
+        run: npm run guard:history
 
       - name: Secret scan (full history)
         uses: gitleaks/gitleaks-action@v2
