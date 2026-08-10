@@ -6,13 +6,11 @@
 // --denylist <path> or AI_LABS_DENYLIST, which is never committed.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Where the private denylist lives when nobody names one. It is deployment
- * material and stays outside the repository, so this is a relative hop out of
- * the checkout, resolved from this file rather than the working directory: a
- * hook, an npm script and a hand-run command all start somewhere different.
+ * The directory holding this file, or null when that cannot be known.
  *
  * Resolved on call, not at import. `import.meta.url` is a file: URL only when
  * this runs as a real module on disk — under the test transform it is not, and
@@ -21,12 +19,88 @@ import { fileURLToPath } from 'node:url';
  *
  * @returns {string | null}
  */
-function conventionalDenylist() {
+function scriptDirectory() {
   try {
-    return fileURLToPath(new URL('../../_private/.denylist', import.meta.url));
+    return dirname(fileURLToPath(import.meta.url));
   } catch {
     return null;
   }
+}
+
+/**
+ * The checkout's shared git directory: the one path that reads the same from the
+ * main checkout and from every linked worktree. A worktree has a git directory
+ * of its own, nested inside the main one, but its COMMON directory is the main
+ * checkout's — which is exactly the property needed here.
+ *
+ * Asked for from this file's own directory rather than the working directory,
+ * for the same reason the hop below is measured from it: a hook, an npm script
+ * and a hand-run command all start somewhere different.
+ *
+ * @param {string | null} from
+ * @returns {string | null}
+ */
+function gitCommonDirectory(from) {
+  try {
+    const output = execFileSync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { cwd: from ?? undefined, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    return output.trim() || null;
+  } catch {
+    // No git on PATH, not a repository, or a git too old to know --path-format.
+    return null;
+  }
+}
+
+/**
+ * Where a private denylist may live when nobody names one, best candidate first.
+ * It is deployment material and stays outside the repository, so each candidate
+ * is a hop out of the checkout to a private sibling directory.
+ *
+ * The git-derived candidate comes first because it is the only one correct from
+ * inside a linked worktree. A worktree holds this script two directories deeper
+ * than the main checkout does, so a hop measured from the script itself lands
+ * inside the worktrees directory rather than beside the checkout, and resolves
+ * to nothing. Nothing found reads as "no denylist configured" — the strongest
+ * rule silently not running, on output that still says the check passed.
+ *
+ * The script-relative hop is kept behind it, for when git cannot be asked at all.
+ *
+ * @param {string | null} scriptDir directory holding this file
+ * @param {string | null} gitCommonDir shared git directory of the checkout
+ * @returns {string[]} absolute paths, most trustworthy first, without duplicates
+ */
+export function denylistCandidates(scriptDir, gitCommonDir) {
+  const candidates = [];
+  // <checkout>/.git -> <checkout> -> the directory the checkout sits in.
+  if (gitCommonDir) {
+    candidates.push(join(dirname(dirname(resolve(gitCommonDir))), '_private', '.denylist'));
+  }
+  if (scriptDir) {
+    candidates.push(resolve(scriptDir, '..', '..', '_private', '.denylist'));
+  }
+  return [...new Set(candidates)];
+}
+
+/**
+ * Whether finding no denylist should fail the run rather than warn.
+ *
+ * Off unless asked for. Every clone outside a deployment that carries real names
+ * has no denylist and must still be able to run the generic rules — including
+ * this repository's own continuous integration. A deployment that does keep one
+ * turns this on, so a denylist that stops resolving becomes a failed check
+ * instead of a quietly weaker one.
+ *
+ * @param {string[]} argv
+ * @param {Record<string, string | undefined>} env
+ * @returns {boolean}
+ */
+export function requiresDenylist(argv, env) {
+  if (argv.includes('--require-denylist')) return true;
+  const value = (env.AI_LABS_REQUIRE_DENYLIST ?? '').trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
 }
 
 const ALLOWED_ABSOLUTE_PREFIXES = ['c:\\program files', 'c:\\programdata', 'c:\\windows'];
@@ -136,16 +210,19 @@ function loadDenylist() {
   // on exactly the check the caller went out of their way to request.
   if (named) {
     if (!existsSync(named)) throw new Error(`Denylist not found: ${named}`);
-    return readDenylist(named);
+    return { ...readDenylist(named), candidates: [named] };
   }
 
-  // Nobody named one, so try the conventional location. This is the difference
+  // Nobody named one, so try the conventional locations. This is the difference
   // between the strongest rule running on every commit and it running only when
   // someone remembers to export a variable first.
-  const conventional = conventionalDenylist();
-  if (conventional && existsSync(conventional)) return readDenylist(conventional);
+  const scriptDir = scriptDirectory();
+  const candidates = denylistCandidates(scriptDir, gitCommonDirectory(scriptDir));
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return { ...readDenylist(candidate), candidates };
+  }
 
-  return { terms: [], path: null };
+  return { terms: [], path: null, candidates };
 }
 
 /**
@@ -224,9 +301,34 @@ function scanHistory(terms) {
   return violations;
 }
 
+/**
+ * Says plainly that the strongest rule did not run. The wording this replaced
+ * read as reassurance for a check that never happened, which is how a worktree
+ * went on reporting a clean tree with the denylist rule silently disabled.
+ *
+ * @param {string[]} candidates
+ * @param {boolean} required
+ */
+function reportMissingDenylist(candidates, required) {
+  console.error('NO PRIVATE DENYLIST FOUND. The denylist rule did NOT run.');
+  console.error('  Generic rules ran: personal paths, absolute paths, emails, encoding.');
+  console.error('  Real names, were any present, would NOT have been detected.');
+  for (const candidate of candidates) console.error(`  Looked for: ${candidate}`);
+  console.error('  Name one with --denylist <path> or AI_LABS_DENYLIST.');
+  if (required) {
+    console.error('\nA denylist was required (--require-denylist or AI_LABS_REQUIRE_DENYLIST),');
+    console.error('so this check FAILED rather than running with a weaker rule set.');
+    process.exit(1);
+  }
+  console.error('  Require one with --require-denylist or AI_LABS_REQUIRE_DENYLIST=1.\n');
+}
+
 function main() {
-  const { terms, path } = loadDenylist();
+  const { terms, path: denylistPath, candidates } = loadDenylist();
   const historyMode = process.argv.includes('--history');
+  if (!denylistPath) {
+    reportMissingDenylist(candidates, requiresDenylist(process.argv, process.env));
+  }
   const violations = [];
   if (historyMode) {
     violations.push(...scanHistory(terms));
@@ -247,7 +349,9 @@ function main() {
     );
     process.exit(1);
   }
-  const note = path ? `${terms.length} private term(s)` : 'no private denylist configured';
+  const note = denylistPath
+    ? `${terms.length} private term(s)`
+    : 'GENERIC RULES ONLY - the denylist rule did not run';
   const scope = historyMode ? 'entire git history' : 'working tree';
   console.log(`Publishable-data check passed on the ${scope} (${note}).`);
 }
