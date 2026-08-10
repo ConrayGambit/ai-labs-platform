@@ -1,0 +1,37 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: checkboxes
+    id: no-real-data
+    attributes:
+      label: Data check
+      options:
+        - label: This report contains no real company, person, client, path or credential.
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Include the concrete failure, not just the symptom.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Exact steps, and the actual command output rather than a description of it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Node version and commit SHA
+    validations:
+      required: true

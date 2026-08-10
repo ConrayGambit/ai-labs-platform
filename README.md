@@ -1,90 +1,77 @@
-# AI Labs Platform
+# AI Labs
 
-A transparent, local-first alternative to Buzz for coordinating development agents. It runs as ordinary Node.js/TypeScript source and a loopback web dashboard; it does not depend on, bundle, or invoke the Buzz desktop application.
+One place to run your companies and build your products, with AI agents working alongside you
+inside it.
 
-## What it supports
+AI Labs coordinates durable organizational agents powered by Claude Code, Codex, Kimi, Hermes and
+other runtimes. **The model powers an employee; it does not define that employee's identity.**
 
-- Multiple local development projects on a durable SQLite Kanban board.
-- Provider runtimes for Hermes, Kimi Code, Claude Code, Codex, DeepSeek, MiniMax, and custom CLIs. DeepSeek and MiniMax have no official agent CLI; both expose Anthropic-compatible APIs, so they run through the installed Claude Code CLI with an endpoint environment bridge (`ANTHROPIC_BASE_URL` + a `${VAR}` reference to your API key — never the key itself).
-- Model / speed / effort tuning as dropdowns fed by each provider's real option lists (verified against official docs, August 2026): Claude Code models + `--effort`, Codex models + `model_reasoning_effort`, Kimi thinking via `--thinking`, DeepSeek V4 models, MiniMax M-series models including the faster `-highspeed` variants. Runtimes without a flag for an option show it as unsupported instead of pretending.
-- A prebuilt executive team in the default organization: Group CEO, Chief of Staff, Chief Innovation Officer, CTO, CMO, and Chief Design Officer, with reporting lines, authority levels, and skill assignments. Edit or extend them like any other agents.
-- A skills registry covering design/marketing tools (Taste, Impeccable, Playwright CLI, awesome-design, img2threejs — vendored copies ship in `vendor/skills/`) plus the built-in skill systems of Claude Code, Codex, and Hermes. Assigned skills are injected into hierarchy prompts as guidance.
-- Organizational agents with a name, job title, department, job function, responsibilities, role instructions, authority level, runtime, manager, and delegation permission.
-- A visible reporting hierarchy with cycle and maximum-depth prevention.
-- Project-specific teams made from reusable organizational agents.
-- Bounded hierarchy runs: specialists report to direct managers, managers synthesize upward, and the root coordinator produces the final review result.
-- Bounded council runs with independent proposals, cross-critique, and Hermes synthesis.
-- Attributed transcripts that record both the provider runtime and the organizational identity.
-- Runtime probes, subprocess timeouts, bounded output, and `shell: false` execution.
+## Status
 
-## Security model
+Early, and honest about it. What exists today:
 
-AI Labs Platform **does not store OAuth tokens, API keys, passwords, cookies, or browser sessions**. Kimi Code, Claude Code, Codex, and Hermes continue to own their authentication and token refresh. Runtime environment configuration stores only endpoint URLs and `${VAR}` *references* to secrets (for example `${DEEPSEEK_API_KEY}`), which are resolved from the host environment at spawn time — the secret value never touches the database. The database stores only non-secret agent roles, executable commands, argument templates, option value lists, projects, tasks, runs, and transcripts.
+- Multiple projects on a durable SQLite Kanban board.
+- A provider runtime registry for Hermes, Kimi Code, Claude Code, Codex, DeepSeek and MiniMax, plus
+  custom CLIs. Model, speed and effort are dropdowns fed by each provider's real option lists;
+  a runtime with no flag for an option shows it as unsupported rather than pretending.
+- A prebuilt executive team — Group CEO, Chief of Staff, Chief Innovation Officer, CTO, CMO and
+  Chief Design Officer — with reporting lines, authority levels and skill assignments.
+- A skills registry with five vendored skills, plus the built-in skill systems of Claude Code,
+  Codex and Hermes.
+- Organizational agents with a name, title, department, function, responsibilities, instructions,
+  authority level, runtime, manager and delegation permission, over a validated reporting graph
+  with cycle and depth prevention.
 
-Do not disable antivirus protection or add exclusions for Buzz. This project is intended to run transparently from source. If a native installer is produced later, it should be code-signed rather than relying on antivirus bypasses.
+What is in progress: the Agent Client Protocol execution core, rooms, the governance engine and the
+desktop client.
+
+## Credentials — read this first
+
+**AI Labs never holds a model provider credential.** It spawns each vendor's own CLI, on your
+machine, under your own login. Claude Code holds its own OAuth. Codex holds its own. Kimi holds its
+own. AI Labs holds nothing, stores nothing and proxies nothing.
+
+This is deliberate. Anthropic does not permit third-party developers to offer Claude.ai login or to
+route requests through subscription plan credentials on behalf of users, and providers have
+suspended accounts for it. For services that need an API key, AI Labs stores only a `${VAR}`
+*reference* resolved from the host environment at spawn time — the secret value never touches the
+database, the logs or an export.
 
 ## Requirements
 
-- Node.js 20 or later.
-- The provider CLIs you intend to use, installed and configured separately.
-- Existing local repositories for projects you register.
+- Node.js 22 or later
+- The provider CLIs you intend to use, installed and authenticated separately
+- Existing local repositories for the projects you register
 
-A CLI being installed is not the same as being ready for inference. Complete each official CLI's own login and model-selection flow before assigning it to a role.
-
-## Run on Windows
-
-Open PowerShell in the extracted project directory:
-
-```powershell
-npm install
-npm run build
-npm start
-```
-
-Then open <http://127.0.0.1:4317>.
-
-The server binds to loopback only by default. Its SQLite database is written to `./data/orchestrator.db`.
-
-## First-run workflow
-
-1. Click **+** beside Projects and register an existing local repository path.
-2. Open **Organization**.
-3. Create a root coordinator, normally powered by Hermes. Give it a high authority level and enable **Can delegate**.
-4. Create managers and specialists, choosing their job title, function, provider runtime, and direct manager.
-5. Return to **Board**, create a task, and click **Run hierarchy**.
-6. Review the attributed output before accepting any code-changing work.
-
-New agents are automatically added to the currently selected project. Create the project before its team in this MVP.
-
-## Development
+## Getting started
 
 ```bash
-npm install
+npm ci
+npm rebuild better-sqlite3
+npm run verify
 npm run dev
 ```
 
-The API listens on `127.0.0.1:4317`; Vite listens on `127.0.0.1:4318` and proxies `/api`.
+Operational data and your deployment profile live **outside** this repository:
 
-## Verification
-
-```bash
-npm test
-npm run typecheck
-npm run build
-```
-
-## Configuration
-
-| Variable | Default | Purpose |
+| Variable | Default | Holds |
 |---|---|---|
-| `ORCHESTRATOR_HOST` | `127.0.0.1` | Server bind address. Keep loopback unless remote access is explicitly secured. |
-| `ORCHESTRATOR_PORT` | `4317` | Local HTTP port. |
-| `ORCHESTRATOR_DATA_DIR` | `./data` | Directory containing the SQLite database. |
+| `AI_LABS_DATA_DIR` | `%LOCALAPPDATA%\AI Labs\data` | Database, worktrees, artifacts, run output |
+| `AI_LABS_PROFILE_DIR` | `%LOCALAPPDATA%\AI Labs\profile` | Ventures, staffing, policy packs, configuration |
 
-## Current MVP limits
+A path inside the repository is refused at startup, not merely gitignored.
 
-- Source distribution only; no signed native installer yet.
-- Hierarchy runs use a bounded synchronous request; streaming and cancellation UI are future work.
-- When a project has multiple root agents, the board currently uses the first assigned root.
-- Existing agents cannot yet be bulk-assigned to a newly created project from the UI; create the project first.
-- The Kanban API supports movement and ranking, but drag-and-drop UI is not included yet.
+## No real data in this repository
+
+Every venture, department, person and piece of business data is created at runtime and lives in your
+profile directory. Nothing about a real business is committed here, ever. `npm run guard` enforces
+it and runs on every commit. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Contributing
+
+Contributions and comments are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Security
+issues go to [SECURITY.md](SECURITY.md), never a public issue.
+
+## Licence
+
+Apache License 2.0 — see [LICENSE](LICENSE).

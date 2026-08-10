@@ -1,0 +1,44 @@
+name: Capability proposal
+description: Propose adopting a skill, plugin, MCP server or dependency
+labels: [capability]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Source repository or registry entry
+    validations:
+      required: true
+  - type: input
+    id: licence
+    attributes:
+      label: Exact licence
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Exact version or commit to pin
+    validations:
+      required: true
+  - type: textarea
+    id: maintenance
+    attributes:
+      label: Maintenance and security
+      description: Last release, open CVEs, maintainer count, usage signal.
+    validations:
+      required: true
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Effective permissions
+      description: >
+        What it can read, write, execute and reach over the network — from an actual test,
+        not from its documentation.
+    validations:
+      required: true
+  - type: textarea
+    id: replaces
+    attributes:
+      label: What this replaces, and the free or already-owned alternative considered
+    validations:
+      required: true

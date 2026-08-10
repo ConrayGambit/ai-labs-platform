@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a change to what AI Labs does
+labels: [enhancement]
+body:
+  - type: checkboxes
+    id: no-real-data
+    attributes:
+      label: Data check
+      options:
+        - label: This request contains no real company, person, client, path or credential.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can you not do today, and why does the platform need to solve it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered, and why they were rejected
+    validations:
+      required: true
