@@ -12,8 +12,11 @@ import { resolveRuntimeEnv } from './agent-process.js';
 import { resolveAiLabsPaths } from './paths.js';
 import { startTenureSweep } from './tenure-sweep.js';
 
-const host = process.env.ORCHESTRATOR_HOST ?? '127.0.0.1';
-const port = Number(process.env.ORCHESTRATOR_PORT ?? '4317');
+// AI_LABS_* is the documented name; ORCHESTRATOR_* is honoured so an existing
+// setup does not break on the rename. Loopback by default: reaching this from
+// another machine is a deliberate act, not something that happens by omission.
+const host = process.env.AI_LABS_HOST ?? process.env.ORCHESTRATOR_HOST ?? '127.0.0.1';
+const port = Number(process.env.AI_LABS_PORT ?? process.env.ORCHESTRATOR_PORT ?? '4317');
 // Walk up to the directory holding package.json. This is correct both for the
 // built output (dist/server/server/index.js) and when running from source under
 // tsx, where the relative depth differs.
