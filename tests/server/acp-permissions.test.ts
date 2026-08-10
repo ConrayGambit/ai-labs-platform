@@ -71,9 +71,16 @@ describe('agent permission requests', () => {
       }),
     });
 
-  /** Resolves once the agent has asked, so no test waits on a fixed delay. */
+  /**
+   * Resolves once the agent has asked, so no test waits on a fixed delay.
+   *
+   * The budget is deliberately close to the suite timeout. A poll budget
+   * shorter than the timeout becomes the binding constraint under parallel
+   * load, and the test then fails for a reason unrelated to what it tests —
+   * which is exactly how this first went red.
+   */
   const awaitPending = async (runId: string): Promise<string> => {
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    for (let attempt = 0; attempt < 2_500; attempt += 1) {
       const pending = supervisor!.getPendingPermission(runId);
       if (pending) return pending.id;
       await new Promise((done) => setTimeout(done, 10));

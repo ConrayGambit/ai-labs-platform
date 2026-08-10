@@ -135,8 +135,10 @@ describe('the realtime socket', () => {
     return new Promise((open) => socket.on('open', () => open({ socket, received })));
   }
 
+  // Budgeted close to the suite timeout on purpose: a poll budget shorter than
+  // the timeout becomes the binding constraint under parallel load.
   const waitFor = async <T>(check: () => T | undefined, what: string): Promise<T> => {
-    for (let attempt = 0; attempt < 300; attempt += 1) {
+    for (let attempt = 0; attempt < 2_500; attempt += 1) {
       const found = check();
       if (found !== undefined) return found;
       await new Promise((done) => setTimeout(done, 10));

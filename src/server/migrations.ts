@@ -598,4 +598,27 @@ export const MIGRATIONS: Migration[] = [
           ON run_permission_requests(run_id, status);
       `,
   },
+  {
+    id: '0013-governance-roles',
+    // Authority over one card at one gate, not a job title.
+    //
+    // The partial unique index is what makes "sole write authority" a fact
+    // rather than a habit: one builder per card-gate, enforced by the database
+    // and not only by whichever repository method happens to check.
+    sql: `
+        CREATE TABLE IF NOT EXISTS review_assignments (
+          id TEXT PRIMARY KEY,
+          card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          gate_id TEXT NOT NULL CHECK(gate_id IN ('G1','G2','G3','G4')),
+          role TEXT NOT NULL CHECK(role IN ('builder','reviewer')),
+          org_agent_id TEXT NOT NULL REFERENCES org_agents(id),
+          assigned_at TEXT NOT NULL,
+          UNIQUE (card_id, gate_id, org_agent_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS review_assignments_one_builder
+          ON review_assignments(card_id, gate_id) WHERE role = 'builder';
+        CREATE INDEX IF NOT EXISTS review_assignments_card
+          ON review_assignments(card_id, gate_id, role);
+      `,
+  },
 ];

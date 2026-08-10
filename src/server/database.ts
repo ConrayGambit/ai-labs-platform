@@ -8,6 +8,7 @@ import { createIdentityRepository, type IdentityRepository } from './identity-re
 import { createOrgRepository, type OrgRepository } from './org-repository.js';
 import { createPlatformRepository, type PlatformRepository } from './platform-repository.js';
 import { createRoomRepository, type RoomRepository } from './room-repository.js';
+import { createGovernanceRepository, type GovernanceRepository } from './governance-repository.js';
 import { createRunRepository, type RunRepository } from './run-repository.js';
 import { createWorkRepository, type WorkRepository } from './work-repository.js';
 import { assertTenureOrdering, type Dedication, type ExpiryKind, type Tenure } from '../shared/org.js';
@@ -773,6 +774,8 @@ export interface OrchestratorDatabase {
   rooms: RoomRepository;
   /** Agent runs and their replayable update transcripts. */
   runs: RunRepository;
+  /** Roles, reviews, findings, rulings and the override register. */
+  governance: GovernanceRepository;
   close(): void;
 }
 
@@ -1548,6 +1551,7 @@ export function createDatabase(filename: string): OrchestratorDatabase {
     work: createWorkRepository(connection),
     rooms: createRoomRepository(connection),
     runs: createRunRepository(connection),
+    governance: createGovernanceRepository(connection),
     close() {
       connection.close();
     },
