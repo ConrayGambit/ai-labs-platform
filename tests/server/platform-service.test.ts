@@ -298,6 +298,78 @@ describe('platform governance service', () => {
     expect(database.platform.listPendingApprovals(portfolio.id)).toHaveLength(1);
   });
 
+  // BLOCKED finding from the 9 August review: the replay path returned the
+  // persisted project and approval BEFORE ownership was validated, so a second
+  // owner replaying a known key received the first owner's records.
+  it('DENIES an idempotency replay by a different owner, returning no record at all', () => {
+    database = createDatabase(':memory:');
+    const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
+    const venture = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'Research Lab', kind: 'research', mission: 'Research tools.',
+    });
+    const input = {
+      ventureId: venture.id,
+      name: 'Tool Survey',
+      objective: 'Compare services.',
+      successCriteria: ['A sourced comparison'],
+      constraints: [],
+      summary: 'Zero-first comparison.',
+      idempotencyKey: 'shared-key',
+    };
+
+    const owner = createPlatformService(database.platform, { currentUserId: 'owner' });
+    const created = owner.createAndSubmitProject(input);
+
+    const intruder = createPlatformService(database.platform, { currentUserId: 'other-owner' });
+    expect(() => intruder.createAndSubmitProject(input)).toThrow(/does not own/i);
+
+    // No leak by any other route, and nothing extra created.
+    expect(() => intruder.getExecutiveSnapshot(portfolio.id)).toThrow(/does not own/i);
+    expect(database.platform.listProjects(venture.id)).toEqual([
+      expect.objectContaining({ id: created.project.id }),
+    ]);
+  });
+
+  // Reordering the checks alone is not enough. A second owner with a portfolio
+  // of their own passes `assertOwnedPortfolio` on their own venture, so the key
+  // itself has to carry an owner or their replay still returns the first
+  // owner's project.
+  it('DENIES a replay whose key was recorded by a different owner even on a venture they own', () => {
+    database = createDatabase(':memory:');
+    const seed = (ownerUserId: string) => {
+      const portfolio = database!.platform.createPortfolio({ name: 'AI Labs', ownerUserId });
+      const venture = database!.platform.createVenture({
+        portfolioId: portfolio.id, name: 'Research Lab', kind: 'research', mission: 'Research tools.',
+      });
+      return { portfolio, venture };
+    };
+    const intake = (ventureId: string) => ({
+      ventureId,
+      name: 'Tool Survey',
+      objective: 'Compare services.',
+      successCriteria: ['A sourced comparison'],
+      constraints: [],
+      summary: 'Zero-first comparison.',
+      idempotencyKey: 'shared-key',
+    });
+
+    const first = seed('owner');
+    const second = seed('other-owner');
+    const created = createPlatformService(database.platform, { currentUserId: 'owner' })
+      .createAndSubmitProject(intake(first.venture.id));
+
+    const other = createPlatformService(database.platform, { currentUserId: 'other-owner' });
+    expect(() => other.createAndSubmitProject(intake(second.venture.id))).toThrow(/does not own/i);
+
+    // The key belongs to whoever made the original request, and the second
+    // owner's own venture gained nothing from the attempt.
+    expect(database.platform.getProjectIntakeIdempotency('shared-key')?.ownerUserId).toBe('owner');
+    expect(database.platform.listProjects(second.venture.id)).toEqual([]);
+    expect(database.platform.listProjects(first.venture.id)).toEqual([
+      expect.objectContaining({ id: created.project.id }),
+    ]);
+  });
+
   it('rejects credential-shaped project prose at the service boundary', () => {
     database = createDatabase(':memory:');
     const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });

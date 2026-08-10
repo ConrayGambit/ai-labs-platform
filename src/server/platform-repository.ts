@@ -62,10 +62,10 @@ export interface PlatformRepository {
   appendEvent(input: Omit<PlatformEvent, 'id' | 'createdAt'>): PlatformEvent;
   listEvents(portfolioId: string, limit: number): PlatformEvent[];
   getProjectIntakeIdempotency(key: string): {
-    requestHash: string; project: WorkProject; approval: ApprovalRequest;
+    requestHash: string; ownerUserId: string | null; project: WorkProject; approval: ApprovalRequest;
   } | null;
   saveProjectIntakeIdempotency(input: {
-    key: string; requestHash: string; projectId: string; approvalId: string;
+    key: string; requestHash: string; ownerUserId: string; projectId: string; approvalId: string;
   }): void;
   listReadyExports(now: string, limit: number, includeDeferred?: boolean): PlatformExportJob[];
   markExportCompleted(eventId: string): void;
@@ -276,20 +276,28 @@ export function createPlatformRepository(connection: Database.Database): Platfor
     },
     getProjectIntakeIdempotency: (key) => {
       const row = connection.prepare(`
-        SELECT request_hash, project_id, approval_id FROM platform_idempotency_keys
+        SELECT request_hash, owner_user_id, project_id, approval_id
+        FROM platform_idempotency_keys
         WHERE operation = 'project_intake' AND key = ?
-      `).get(key) as { request_hash: string; project_id: string; approval_id: string } | undefined;
+      `).get(key) as
+        | { request_hash: string; owner_user_id: string | null; project_id: string; approval_id: string }
+        | undefined;
       if (!row) return null;
       const project = getProject(row.project_id);
       const approval = getApproval(row.approval_id);
       if (!project || !approval) throw new Error(`Idempotency record is incomplete: ${key}`);
-      return { requestHash: row.request_hash, project, approval };
+      return {
+        requestHash: row.request_hash,
+        ownerUserId: row.owner_user_id ?? null,
+        project,
+        approval,
+      };
     },
     saveProjectIntakeIdempotency: (input) => {
       connection.prepare(`
         INSERT INTO platform_idempotency_keys
-          (operation, key, request_hash, project_id, approval_id, created_at)
-        VALUES ('project_intake', @key, @requestHash, @projectId, @approvalId, @createdAt)
+          (operation, key, request_hash, owner_user_id, project_id, approval_id, created_at)
+        VALUES ('project_intake', @key, @requestHash, @ownerUserId, @projectId, @approvalId, @createdAt)
       `).run({ ...input, createdAt: new Date().toISOString() });
     },
     listReadyExports: (now, limit, includeDeferred = false) => exportOutbox.listReady(now, limit, includeDeferred),

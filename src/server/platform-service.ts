@@ -139,17 +139,37 @@ export function createPlatformService(
         ...input.successCriteria, ...(input.constraints ?? []),
       ]);
       const requestHash = intakeHash(input);
-      const execute = () => repository.transaction(() => {
-        if (input.idempotencyKey) {
-          const existing = repository.getProjectIntakeIdempotency(input.idempotencyKey);
-          if (existing) {
-            if (existing.requestHash !== requestHash) throw new Error('Idempotency key conflicts with another request');
-            return { project: existing.project, approval: existing.approval, replayed: true };
-          }
+
+      /**
+       * Ownership is established BEFORE any persisted record is returned.
+       *
+       * The replay path used to return the stored project and approval first and
+       * validate ownership afterwards, so replaying a known key handed the caller
+       * another owner's records. Both the main path and the recovery path below
+       * go through this.
+       */
+      const replayFor = (key: string) => {
+        const existing = repository.getProjectIntakeIdempotency(key);
+        if (!existing) return null;
+        if (existing.ownerUserId !== context.currentUserId) {
+          throw new Error('Trusted user does not own this idempotency key');
         }
+        if (existing.requestHash !== requestHash) {
+          throw new Error('Idempotency key conflicts with another request');
+        }
+        return { project: existing.project, approval: existing.approval, replayed: true as const };
+      };
+
+      const execute = () => repository.transaction(() => {
         const venture = repository.getVenture(input.ventureId);
         if (!venture) throw new Error(`Venture not found: ${input.ventureId}`);
         assertOwnedPortfolio(venture.portfolioId);
+
+        if (input.idempotencyKey) {
+          const replayed = replayFor(input.idempotencyKey);
+          if (replayed) return replayed;
+        }
+
         const project = repository.createProject(input);
         const submitted = submitProjectPlan({
           projectId: project.id,
@@ -160,20 +180,23 @@ export function createPlatformService(
           repository.saveProjectIntakeIdempotency({
             key: input.idempotencyKey,
             requestHash,
+            ownerUserId: context.currentUserId,
             projectId: submitted.project.id,
             approvalId: submitted.approval.id,
           });
         }
         return { ...submitted, replayed: false };
       });
+
       try {
         return execute();
       } catch (reason) {
+        // Recovery after a lost response. Ownership is re-checked here too: this
+        // path is reachable by anyone, and skipping the check was half of the
+        // original defect.
         if (input.idempotencyKey) {
-          const existing = repository.getProjectIntakeIdempotency(input.idempotencyKey);
-          if (existing?.requestHash === requestHash) {
-            return { project: existing.project, approval: existing.approval, replayed: true };
-          }
+          const replayed = replayFor(input.idempotencyKey);
+          if (replayed) return replayed;
         }
         throw reason;
       }

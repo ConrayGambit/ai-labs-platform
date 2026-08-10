@@ -17,6 +17,7 @@ import type {
   Task,
   TaskStatus,
 } from '../shared/domain.js';
+import { RequestFailedError } from './idempotency.js';
 
 type RuntimeOptionsPatch = {
   optionTemplates?: AgentRuntime['optionTemplates'];
@@ -57,17 +58,27 @@ type OrgTab = 'board' | 'team';
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Request failed (${response.status})`);
+  if (!response.ok) throw new RequestFailedError(response.status);
   return await response.json() as T;
 }
 
-async function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
+async function sendJson<T>(
+  url: string,
+  method: string,
+  body?: unknown,
+  headers?: Record<string, string>,
+): Promise<T> {
   const response = await fetch(url, {
     method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: {
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...headers,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`Request failed (${response.status})`);
+  // The status travels with the error: a caller holding an idempotency key needs
+  // to tell an undecided outcome from a decided one.
+  if (!response.ok) throw new RequestFailedError(response.status);
   if (response.status === 204) return undefined as T;
   return await response.json() as T;
 }

@@ -398,4 +398,13 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS platform_projects_venture ON platform_projects(venture_id);
       `,
   },
+  {
+    id: '0007-idempotency-owner',
+    // An idempotency key is a claim on a prior result, so it belongs to whoever
+    // made that request. Without an owner recorded, replaying a known key was
+    // enough to be handed another owner's project and approval.
+    sql: `
+        ALTER TABLE platform_idempotency_keys ADD COLUMN owner_user_id TEXT;
+      `,
+  },
 ];
