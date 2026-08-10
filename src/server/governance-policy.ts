@@ -85,3 +85,68 @@ export function specificationIsComplete(
   const missing = SPECIFICATION_SECTIONS.filter((key) => !sections[key]?.trim());
   return { complete: missing.length === 0, missing: [...missing] };
 }
+
+/**
+ * The nine points of a handover report (spec 20.5).
+ *
+ * Two are named by the spec itself: `commands_and_actual_output` and
+ * `exact_next_work_item`. The rest are the platform's reading of it, confirmed
+ * by the owner.
+ */
+export const HANDOVER_POINTS = [
+  'what_changed',
+  'why',
+  'commands_and_actual_output',
+  'test_results',
+  'known_limitations',
+  'risks_and_residual_findings',
+  'deviations_from_the_specification',
+  'follow_up_items',
+  'exact_next_work_item',
+] as const;
+
+export type HandoverPoint = (typeof HANDOVER_POINTS)[number];
+export type HandoverPoints = Partial<Record<HandoverPoint, string>>;
+
+export function isHandoverPoint(key: string): key is HandoverPoint {
+  return (HANDOVER_POINTS as readonly string[]).includes(key);
+}
+
+/**
+ * Whether a section shows what the machine said rather than what the writer
+ * remembers it saying.
+ *
+ * "Commands run and test results (actual output, not claims)" is a literal
+ * requirement, so it is checked literally. A fenced block or a prompt line is
+ * pasted output; a sentence is not.
+ *
+ * A leading digit is deliberately NOT accepted, though it would catch some real
+ * output: "326 tests passed and the build was green" is still a claim, and
+ * admitting it would readmit exactly what this rule refuses, one character of
+ * effort later. The cost of being strict is a writer wrapping their paste in
+ * backticks.
+ */
+export function containsActualOutput(section: string): boolean {
+  return section.split('\n').some((line) => {
+    const trimmed = line.trim();
+    return trimmed.startsWith('```') || trimmed.startsWith('$') || trimmed.startsWith('>');
+  });
+}
+
+/**
+ * Which points are still unwritten.
+ *
+ * `commands_and_actual_output` counts as unwritten while it holds only a claim,
+ * because a section that says "all tests passed" has not been written — it has
+ * been asserted.
+ */
+export function handoverIsComplete(
+  points: HandoverPoints,
+): { complete: boolean; missing: HandoverPoint[] } {
+  const missing = HANDOVER_POINTS.filter((key) => {
+    const value = points[key]?.trim();
+    if (!value) return true;
+    return key === 'commands_and_actual_output' && !containsActualOutput(value);
+  });
+  return { complete: missing.length === 0, missing: [...missing] };
+}

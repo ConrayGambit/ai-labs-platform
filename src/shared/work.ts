@@ -165,6 +165,8 @@ export interface AdvanceEvidence {
    * enforced on one path and not another.
    */
   missingSpecificationSections: readonly string[];
+  /** Handover points still unwritten. Empty means complete. Required, as above. */
+  missingHandoverPoints: readonly string[];
 }
 
 /**

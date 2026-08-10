@@ -16,6 +16,7 @@ import {
 } from '../shared/work.js';
 import { OWNER_USER_ID } from '../shared/identity.js';
 import { getLadder } from './gate-policy.js';
+import { handoverIsComplete, type HandoverPoints } from './governance-policy.js';
 
 interface CardRow {
   id: string;
@@ -321,6 +322,27 @@ export function createWorkRepository(connection: Database.Database): WorkReposit
         const source = requireCardRow(input.cardId);
         // A gate column is not a status. Translate here, once, so no caller has
         // to remember that G2 means "in review, at G2".
+        /*
+         * moveCard is the ONLY write to a card's status, so the close rule sits
+         * here as well as in the gate policy. Policy is what a caller consults;
+         * this is what holds when a caller forgets to. Three reviews running,
+         * every defect found has been a rule enforced on one path while another
+         * path reached the same state — so the narrowest shared point gets the
+         * check too.
+         */
+        if (input.to === 'done') {
+          const stored = connection
+            .prepare('SELECT points_json FROM card_handovers WHERE card_id = ?')
+            .get(input.cardId) as { points_json: string } | undefined;
+          const points = stored ? JSON.parse(stored.points_json) as HandoverPoints : {};
+          const { missing } = handoverIsComplete(points);
+          if (missing.length > 0) {
+            throw new Error(
+              `A card closes on a complete handover report; still missing: ${missing.join(', ')}`,
+            );
+          }
+        }
+
         const isGate = /^G[1-4]$/.test(input.to);
         const status: CardStatus = isGate ? 'review' : (input.to as CardStatus);
         const gateId: GateId | null = isGate ? (input.to as GateId) : null;

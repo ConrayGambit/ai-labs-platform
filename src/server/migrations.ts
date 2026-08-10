@@ -795,4 +795,16 @@ export const MIGRATIONS: Migration[] = [
         );
       `,
   },
+  {
+    id: '0019-handover',
+    // The report that hands the work back. Like the specification, absence is
+    // the incomplete state: a card with no row is missing all nine.
+    sql: `
+        CREATE TABLE IF NOT EXISTS card_handovers (
+          card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+          points_json TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL
+        );
+      `,
+  },
 ];

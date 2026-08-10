@@ -175,6 +175,16 @@ export function canAdvance(request: AdvanceRequest): AdvanceVerdict {
       reason: 'A card closes on an inspectable artifact; this one has none attached.',
     };
   }
+  if (to === 'done' && evidence.missingHandoverPoints.length > 0) {
+    // "Done" is not "it runs" (spec 20.6). Work handed back without a handover
+    // is work the next person has to reconstruct.
+    return {
+      allowed: false,
+      reason:
+        `A card closes on a complete handover report; still missing: ` +
+        `${evidence.missingHandoverPoints.join(', ')}.`,
+    };
+  }
 
   // Entering a gate is free; leaving it is what costs evidence.
   void destinationGate;

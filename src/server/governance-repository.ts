@@ -18,8 +18,12 @@ import {
 import { effectiveReviewerCount, type GateId } from '../shared/work.js';
 import { getLadder } from './gate-policy.js';
 import {
+  handoverIsComplete,
+  isHandoverPoint,
   isSpecificationSection,
   specificationIsComplete,
+  type HandoverPoint,
+  type HandoverPoints,
   type SpecificationSection,
   type SpecificationSections,
 } from './governance-policy.js';
@@ -110,6 +114,11 @@ export interface GovernanceRepository {
   getSpecification(cardId: string): CardSpecification | null;
   /** Sections still unwritten. A card with no specification is missing all of them. */
   missingSpecificationSections(cardId: string): SpecificationSection[];
+  /** Merges points into the card's handover report. Never replaces it wholesale. */
+  saveHandover(input: { cardId: string; points: HandoverPoints }): CardHandover;
+  getHandover(cardId: string): CardHandover | null;
+  /** Points still unwritten, counting a claimed-output section as unwritten. */
+  missingHandoverPoints(cardId: string): HandoverPoint[];
   /** Sets when an outstanding reviewer stops being able to seal the gate. */
   setReviewDeadline(input: {
     cardId: string; gateId: GateId; orgAgentId: string; deadlineAt: string | null;
@@ -170,6 +179,12 @@ const mapReview = (row: ReviewRow, findings: Finding[]): Review => ({
 export interface CardSpecification {
   cardId: string;
   sections: SpecificationSections;
+  updatedAt: string;
+}
+
+export interface CardHandover {
+  cardId: string;
+  points: HandoverPoints;
   updatedAt: string;
 }
 
@@ -386,6 +401,19 @@ export function createGovernanceRepository(connection: Database.Database): Gover
       ? {
         cardId: row.card_id,
         sections: JSON.parse(row.sections_json) as SpecificationSections,
+        updatedAt: row.updated_at,
+      }
+      : null;
+  };
+
+  const getHandover = (cardId: string): CardHandover | null => {
+    const row = connection
+      .prepare('SELECT * FROM card_handovers WHERE card_id = ?')
+      .get(cardId) as { card_id: string; points_json: string; updated_at: string } | undefined;
+    return row
+      ? {
+        cardId: row.card_id,
+        points: JSON.parse(row.points_json) as HandoverPoints,
         updatedAt: row.updated_at,
       }
       : null;
@@ -691,6 +719,33 @@ export function createGovernanceRepository(connection: Database.Database): Gover
 
     missingSpecificationSections: (cardId) =>
       specificationIsComplete(getSpecification(cardId)?.sections ?? {}).missing,
+
+    saveHandover(input) {
+      return connection.transaction((): CardHandover => {
+        for (const key of Object.keys(input.points)) {
+          if (!isHandoverPoint(key)) throw new Error(`"${key}" is not a handover point`);
+        }
+        const existing = getHandover(input.cardId);
+        // Merge, never replace, for the same reason the specification does.
+        const points = { ...existing?.points, ...input.points };
+        connection.prepare(`
+          INSERT INTO card_handovers (card_id, points_json, updated_at)
+          VALUES (@cardId, @pointsJson, @updatedAt)
+          ON CONFLICT(card_id) DO UPDATE SET
+            points_json = excluded.points_json, updated_at = excluded.updated_at
+        `).run({
+          cardId: input.cardId,
+          pointsJson: JSON.stringify(points),
+          updatedAt: new Date().toISOString(),
+        });
+        return getHandover(input.cardId)!;
+      })();
+    },
+
+    getHandover,
+
+    missingHandoverPoints: (cardId) =>
+      handoverIsComplete(getHandover(cardId)?.points ?? {}).missing,
 
     listOverrides(filter) {
       const rows = filter.cardId
