@@ -34,8 +34,28 @@ export interface BuildReportInput {
 const orElse = (lines: string[], nothingHappened: string): string[] =>
   lines.length > 0 ? lines : [nothingHappened];
 
+/**
+ * A calendar day, and a real one.
+ *
+ * Every row is matched with `LIKE 'date%'`, so a month-shaped string quietly
+ * covers thirty days and stores the result as though it were one — a plausible
+ * report filed under a key that is not a day. The prefix match is what makes
+ * the shape load-bearing, so the shape is checked rather than assumed.
+ */
+function assertCalendarDay(date: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`A report date must be a calendar day as YYYY-MM-DD: "${date}"`);
+  }
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    // Catches 2026-02-30, which matches the shape and is not a day.
+    throw new Error(`A report date must be a real calendar day: "${date}"`);
+  }
+}
+
 export function buildAdjudicationReport(input: BuildReportInput): Report | null {
   const { database, date } = input;
+  assertCalendarDay(date);
   const connection = database.connection;
   const onDate = `${date}%`;
 

@@ -76,6 +76,21 @@ describe('the daily adjudication report', () => {
     ]);
   });
 
+  // Found in review: rows are matched with LIKE 'date%', so a month-shaped
+  // string silently covered thirty days and was stored as though it were one.
+  it('REFUSES a date that is not a calendar day', () => {
+    seed();
+
+    expect(() => buildAdjudicationReport({ database: database!, date: '2026-08' }))
+      .toThrow(/calendar day/i);
+    expect(() => buildAdjudicationReport({ database: database!, date: 'not-a-date' }))
+      .toThrow(/calendar day/i);
+    // Right shape, not a real day.
+    expect(() => buildAdjudicationReport({ database: database!, date: '2026-02-30' }))
+      .toThrow(/real calendar day/i);
+    expect(database!.governance.listAdjudicationReports()).toEqual([]);
+  });
+
   it('writes NO report for a date on which nothing happened', () => {
     seed();
 
