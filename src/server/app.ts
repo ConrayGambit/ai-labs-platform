@@ -10,6 +10,7 @@ import websocket from '@fastify/websocket';
 import type { OrchestratorDatabase } from './database.js';
 import { createHierarchyOrchestrator } from './hierarchy.js';
 import { registerPlatformApi, type ExportFailureLogger } from './platform-api.js';
+import { registerWorkApi } from './work-api.js';
 import { probeAgentRuntimes } from './runtime-health.js';
 import type { PlatformEvent } from '../shared/platform.js';
 
@@ -370,6 +371,8 @@ export function buildApp({
     if (!run) throw new Error(`Run not found: ${request.params.runId}`);
     return { run, messages: database.listRunMessages(run.id) };
   });
+
+  registerWorkApi(app, database, { currentUserId, supervisor });
 
   if (supervisor) {
     // Registered last so the plugin is in place before the route it serves.
