@@ -136,6 +136,46 @@ describe('roles on a card at a gate', () => {
     })).not.toThrow();
   });
 
+  // Found in review: every eligibility check lived on the reviewer path, so
+  // assigning the builder LAST skipped all of them. The rule was defeatable by
+  // doing the same two things in the other order.
+  it('REFUSES a builder assigned after a reviewer already on that model', () => {
+    const { card, builder, sameModel } = seed();
+    database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: sameModel.id,
+    });
+
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: builder.id,
+    })).toThrow(/same model/i);
+    expect(database!.governance.getBuilder(card.id, 'G1')).toBeNull();
+  });
+
+  it('REFUSES a builder assigned after it is already a reviewer on that gate', () => {
+    const { card, builder } = seed();
+    database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: builder.id,
+    });
+
+    // Previously this surfaced a bare UNIQUE constraint message, which names a
+    // schema index and tells an operator nothing they can act on.
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: builder.id,
+    })).toThrow(/may not hold both roles/i);
+  });
+
+  it('allows a builder assigned last when the reviewers run other models', () => {
+    const { card, builder, otherModel } = seed();
+    database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: otherModel.id,
+    });
+
+    // The check has to refuse the bad ordering without refusing the good one.
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: builder.id,
+    })).not.toThrow();
+  });
+
   it('assigning the same reviewer twice is not an error and does not duplicate them', () => {
     const { card, builder, otherModel } = seed();
     database!.governance.assignRole({

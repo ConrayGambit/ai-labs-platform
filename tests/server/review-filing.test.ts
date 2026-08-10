@@ -197,6 +197,65 @@ describe('filing a review', () => {
     expect(database!.governance.listReviews(card.id, 'G1')).toHaveLength(2);
   });
 
+  // Found in review: two reviews from one reviewer both stood, so a
+  // two-reviewer gate was satisfiable by one reviewer pressing file twice.
+  it('SUPERSEDES a reviewer earlier review rather than letting both stand', () => {
+    const { card, reviewer } = seed();
+
+    const first = database!.governance.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
+      verdict: 'reject', checklist, whatToPreserve: '', questionsForBuilder: '',
+      findings: [{
+        priority: 'P1', area: 'access', finding: 'No venture check.',
+        predictedFailure: 'A staff user reads another venture cards.',
+        evidence: 'src/server/work-api.ts:88', proposedFix: 'Check access.',
+      }],
+    });
+    const corrected = database!.governance.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
+      verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
+    });
+
+    // Only one review currently stands, so counting cannot be gamed...
+    expect(database!.governance.listCurrentReviews(card.id, 'G1').map((r) => r.id))
+      .toEqual([corrected.id]);
+    // ...and the original is still readable, marked as superseded, because what
+    // was believed at the time is itself evidence.
+    const all = database!.governance.listReviews(card.id, 'G1');
+    expect(all).toHaveLength(2);
+    expect(all.find((r) => r.id === first.id)?.supersededByReviewId).toBe(corrected.id);
+    expect(database!.governance.getReview(first.id)?.findings).toHaveLength(1);
+  });
+
+  it('counts two distinct reviewers as two current reviews', () => {
+    const { card, reviewer } = seed();
+    const second = database!.createOrgAgent({
+      name: 'Second reviewer', jobTitle: 'Specialist', department: 'Research',
+      jobFunction: 'Reviews.', responsibilities: 'Review.',
+      runtimeId: database!.createAgent({
+        name: 'Runtime E', command: 'runtime-e', argsTemplate: ['{prompt}'],
+        promptTransport: 'argument', outputFormat: 'text',
+        versionArgs: ['--version'], timeoutMs: 120_000,
+      }).id,
+      model: 'model-five',
+    });
+    database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: second.id,
+    });
+
+    database!.governance.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
+      verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
+    });
+    database!.governance.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: second.id,
+      verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
+    });
+
+    // Superseding must not collapse genuinely independent reviews.
+    expect(database!.governance.listCurrentReviews(card.id, 'G1')).toHaveLength(2);
+  });
+
   it('does not mix a G1 review into G2', () => {
     const { card, reviewer } = seed();
     database!.governance.fileReview({

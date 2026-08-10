@@ -52,7 +52,19 @@ export interface GovernanceRepository {
    */
   fileReview(input: FileReviewInput): Review;
   getReview(reviewId: string): Review | null;
+  /**
+   * Every review ever filed at this gate, superseded ones included. The record
+   * of what was believed at the time is itself evidence (spec 20.5).
+   */
   listReviews(cardId: string, gateId: GateId): Review[];
+  /**
+   * The reviews that currently stand — one per reviewer, superseded excluded.
+   *
+   * This is what counting must use. Counting every row would let one reviewer
+   * satisfy a two-reviewer gate by filing twice, which is the blind-review
+   * discipline defeated by a refresh button.
+   */
+  listCurrentReviews(cardId: string, gateId: GateId): Review[];
 }
 
 interface ReviewRow {
@@ -197,12 +209,45 @@ export function createGovernanceRepository(connection: Database.Database): Gover
           .get(input.cardId, input.gateId, input.orgAgentId) as AssignmentRow | undefined;
         // Already in this role: harmless, and the same answer as the first time.
         if (existing && existing.role === input.role) return mapAssignment(existing);
+        if (existing) {
+          // Swapping role would make one agent both author and judge. Refused
+          // with a sentence: the bare UNIQUE constraint underneath names a
+          // schema index and tells an operator nothing they can act on.
+          //
+          // The builder-becoming-reviewer direction keeps the spec's own words,
+          // because "may not review its own work" says why, and "may not hold
+          // both roles" only says what.
+          throw new Error(
+            existing.role === 'builder'
+              ? `A builder may not review its own work: ${input.orgAgentId}`
+              : `${input.orgAgentId} is already the ${existing.role} on ${input.cardId} at ` +
+                `${input.gateId}; an agent may not hold both roles on one gate`,
+          );
+        }
 
         const builder = getBuilder(input.cardId, input.gateId);
-        if (input.role === 'builder' && builder) {
-          throw new Error(
-            `Card already has a builder at ${input.gateId}: ${builder.orgAgentId}`,
-          );
+        if (input.role === 'builder') {
+          if (builder) {
+            throw new Error(
+              `Card already has a builder at ${input.gateId}: ${builder.orgAgentId}`,
+            );
+          }
+          /*
+           * A builder assigned AFTER its reviewers must face the same test they
+           * did. Checking only on the reviewer path left the rule defeatable by
+           * ordering: assign the reviewer first, then a builder on that
+           * reviewer's model, and a same-model pair sails through — which is
+           * exactly the arrangement spec 20.3 exists to prevent.
+           */
+          const incoming = identityOf(input.orgAgentId);
+          for (const reviewer of listReviewers(input.cardId, input.gateId)) {
+            const eligibility = canReview(identityOf(reviewer.orgAgentId), incoming);
+            if (!eligibility.allowed) {
+              throw new Error(
+                `${eligibility.reason}: reviewer ${reviewer.orgAgentId} is already assigned`,
+              );
+            }
+          }
         }
         if (input.role === 'reviewer') {
           const eligibility = canReview(
@@ -267,6 +312,25 @@ export function createGovernanceRepository(connection: Database.Database): Gover
           filedAt: now,
         });
 
+        /*
+         * A reviewer filing again is correcting themselves, and a correction is
+         * a new entry marking the original superseded — never an edit. Leaving
+         * both standing would also let one reviewer count twice toward a
+         * two-reviewer gate.
+         */
+        const previous = connection
+          .prepare(
+            `SELECT id FROM reviews
+              WHERE card_id = ? AND gate_id = ? AND reviewer_org_agent_id = ?
+                AND superseded_by_review_id IS NULL AND id <> ?`,
+          )
+          .all(input.cardId, input.gateId, input.reviewerOrgAgentId, reviewId) as Array<{ id: string }>;
+        for (const row of previous) {
+          connection
+            .prepare('UPDATE reviews SET superseded_by_review_id = ? WHERE id = ?')
+            .run(reviewId, row.id);
+        }
+
         const insertFinding = connection.prepare(`
           INSERT INTO review_findings (
             id, review_id, priority, area, finding, predicted_failure,
@@ -291,6 +355,16 @@ export function createGovernanceRepository(connection: Database.Database): Gover
     listReviews: (cardId, gateId) =>
       (connection
         .prepare('SELECT * FROM reviews WHERE card_id = ? AND gate_id = ? ORDER BY filed_at, id')
+        .all(cardId, gateId) as ReviewRow[])
+        .map((row) => mapReview(row, findingsFor(row.id))),
+
+    listCurrentReviews: (cardId, gateId) =>
+      (connection
+        .prepare(
+          `SELECT * FROM reviews
+            WHERE card_id = ? AND gate_id = ? AND superseded_by_review_id IS NULL
+            ORDER BY filed_at, id`,
+        )
         .all(cardId, gateId) as ReviewRow[])
         .map((row) => mapReview(row, findingsFor(row.id))),
   };
