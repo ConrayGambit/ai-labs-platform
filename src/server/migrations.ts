@@ -9,16 +9,12 @@ export interface Migration {
    * identity: it is what gets checksummed.
    */
   sql: string;
-  /**
-   * Conditional work that cannot be expressed as static SQL — column backfills
-   * that depend on the schema already present, since SQLite has no
-   * `ADD COLUMN IF NOT EXISTS`.
-   *
-   * Deliberately NOT checksummed, so it must be idempotent and must not change
-   * the meaning of `sql`. Anything that alters meaning belongs in a new migration.
-   */
-  post?: (connection: Database.Database) => void;
 }
+
+// A migration is SQL and nothing else. An escape hatch for arbitrary code was
+// tried and removed: it could not be checksummed without reintroducing the
+// build-dependence this design exists to avoid, and every backfill it carried was
+// already redundant with the CREATE TABLE statements above it.
 
 /**
  * Detects a migration edited after it was applied, which silently diverges
@@ -75,7 +71,6 @@ export function applyMigrations(
     }
     connection.transaction(() => {
       connection.exec(migration.sql);
-      migration.post?.(connection);
       record.run(migration.id, digest, new Date().toISOString());
     })();
     applied.push(migration.id);
@@ -229,52 +224,6 @@ export const MIGRATIONS: Migration[] = [
 
         CREATE INDEX IF NOT EXISTS messages_run_timeline ON messages(run_id, created_at);
       `,
-    // Column backfills for databases created before these columns existed.
-    // Idempotent and additive: SQLite has no ADD COLUMN IF NOT EXISTS.
-    post: (connection) => {
-      const hasColumn = (table: string, column: string): boolean => {
-        const columns = connection.pragma(`table_info(${table})`) as Array<{ name: string }>;
-        return columns.some(({ name }) => name === column);
-      };
-      if (!hasColumn('runs', 'root_org_agent_id')) {
-        connection.exec(
-          'ALTER TABLE runs ADD COLUMN root_org_agent_id TEXT REFERENCES org_agents(id) ON DELETE SET NULL',
-        );
-      }
-      if (!hasColumn('messages', 'org_agent_id')) {
-        connection.exec(
-          'ALTER TABLE messages ADD COLUMN org_agent_id TEXT REFERENCES org_agents(id) ON DELETE SET NULL',
-        );
-      }
-      if (!hasColumn('agents', 'option_templates_json')) {
-        connection.exec(
-          "ALTER TABLE agents ADD COLUMN option_templates_json TEXT NOT NULL DEFAULT '{}'",
-        );
-      }
-      if (!hasColumn('agents', 'option_values_json')) {
-        connection.exec(
-          "ALTER TABLE agents ADD COLUMN option_values_json TEXT NOT NULL DEFAULT '{}'",
-        );
-      }
-      if (!hasColumn('agents', 'env_json')) {
-        connection.exec("ALTER TABLE agents ADD COLUMN env_json TEXT NOT NULL DEFAULT '{}'");
-      }
-      if (!hasColumn('org_agents', 'organization_id')) {
-        connection.exec(
-          "ALTER TABLE org_agents ADD COLUMN organization_id TEXT NOT NULL DEFAULT 'default-org'",
-        );
-      }
-      if (!hasColumn('org_agents', 'model')) {
-        connection.exec('ALTER TABLE org_agents ADD COLUMN model TEXT');
-        connection.exec('ALTER TABLE org_agents ADD COLUMN speed TEXT');
-        connection.exec('ALTER TABLE org_agents ADD COLUMN effort TEXT');
-      }
-      if (!hasColumn('projects', 'organization_id')) {
-        connection.exec(
-          "ALTER TABLE projects ADD COLUMN organization_id TEXT NOT NULL DEFAULT 'default-org'",
-        );
-      }
-    },
   },
   {
     id: '0002-identity',

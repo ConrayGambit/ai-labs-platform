@@ -39,22 +39,20 @@ describe('migration checksums ignore formatting', () => {
     expect(() => applyMigrations(connection!, [altered])).toThrow(/checksum/i);
   });
 
-  it('does not let post-hook edits change a checksum, so post must stay idempotent', () => {
+  it('checksums every statement, so nothing in a migration escapes the check', () => {
     connection = new Database(':memory:');
     const first: Migration = {
-      id: '9103-post',
-      sql: 'CREATE TABLE pst (id TEXT)',
-      post: (db) => db.exec('CREATE INDEX IF NOT EXISTS pst_id ON pst(id)'),
+      id: '9103-all',
+      sql: 'CREATE TABLE pst (id TEXT); CREATE INDEX pst_id ON pst(id);',
     };
-    const secondPost: Migration = {
-      id: '9103-post',
-      sql: 'CREATE TABLE pst (id TEXT)',
-      post: (db) => db.exec('CREATE INDEX IF NOT EXISTS pst_id2 ON pst(id)'),
+    const second: Migration = {
+      id: '9103-all',
+      sql: 'CREATE TABLE pst (id TEXT); CREATE INDEX pst_id2 ON pst(id);',
     };
     applyMigrations(connection, [first]);
-    // Documented consequence of not hashing `post`: this is accepted silently.
-    // It is why `post` is restricted to idempotent, meaning-preserving backfills.
-    expect(() => applyMigrations(connection!, [secondPost])).not.toThrow();
+    // A migration is SQL and nothing else, so a change anywhere in it is caught.
+    // There is no unhashed escape hatch to slip a change through.
+    expect(() => applyMigrations(connection!, [second])).toThrow(/checksum/i);
   });
 });
 

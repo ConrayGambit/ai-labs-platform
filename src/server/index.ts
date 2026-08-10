@@ -8,6 +8,7 @@ import type { AgentInvoker } from './council.js';
 import { createDatabase } from './database.js';
 import { createObsidianExporter } from './obsidian-exporter.js';
 import { resolveAiLabsPaths } from './paths.js';
+import { startTenureSweep } from './tenure-sweep.js';
 
 const host = process.env.ORCHESTRATOR_HOST ?? '127.0.0.1';
 const port = Number(process.env.ORCHESTRATOR_PORT ?? '4317');
@@ -63,11 +64,25 @@ if (existsSync(webRoot)) {
   });
 }
 
+// Date-based tenure expiry needs something to drive it, or a recorded end date is
+// a promise the platform never keeps.
+const tenureSweep = startTenureSweep(database, {
+  onResult: (result) => {
+    for (const orgAgentId of result.expired) {
+      console.log(`Tenure ended: ${orgAgentId}`);
+    }
+    for (const blocked of result.blocked) {
+      console.warn(`Tenure expiry blocked for ${blocked.orgAgentId}: ${blocked.reason}`);
+    }
+  },
+});
+
 let closing = false;
 async function shutdown(signal: string): Promise<void> {
   if (closing) return;
   closing = true;
   app.log.info({ signal }, 'Shutting down AI Labs core');
+  tenureSweep.stop();
   await app.close();
   database.close();
 }
