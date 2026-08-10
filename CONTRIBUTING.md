@@ -9,16 +9,24 @@ documentation, commit messages or screenshots.
 Every fixture must be obviously synthetic on sight. `npm run guard` enforces this and runs as a
 pre-commit hook. **Do not weaken the guard to make a commit pass.**
 
-If you maintain a deployment with real names, keep a private denylist file outside the repository
-and point the guard at it:
+If you maintain a deployment with real names, keep a private denylist file outside the repository —
+one lower-case term per line. The guard reads `../_private/.denylist`, a sibling of the checkout,
+without being asked, so the strongest rule runs on every commit instead of only when someone
+remembers to export a variable first.
+
+To keep it elsewhere, name it:
 
 ```bash
-export AI_LABS_DENYLIST=/path/outside/the/repo/.denylist   # one lower-case term per line
+export AI_LABS_DENYLIST=/path/outside/the/repo/.denylist
 npm run guard
 ```
 
-Without it the guard still enforces its generic rules — personal home paths, arbitrary absolute
-paths, real email addresses — and reports that no denylist was configured.
+A denylist named by hand must exist. The guard fails rather than quietly falling back to the
+generic rules, because a mistyped path that reports a clean repository is precisely the outcome
+this check exists to prevent.
+
+With no denylist at all — which is every clone outside your own deployment — the guard still
+enforces its generic rules: personal home paths, arbitrary absolute paths, real email addresses.
 
 ## Getting set up
 

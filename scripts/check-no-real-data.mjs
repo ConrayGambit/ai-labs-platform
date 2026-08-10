@@ -6,6 +6,28 @@
 // --denylist <path> or AI_LABS_DENYLIST, which is never committed.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Where the private denylist lives when nobody names one. It is deployment
+ * material and stays outside the repository, so this is a relative hop out of
+ * the checkout, resolved from this file rather than the working directory: a
+ * hook, an npm script and a hand-run command all start somewhere different.
+ *
+ * Resolved on call, not at import. `import.meta.url` is a file: URL only when
+ * this runs as a real module on disk — under the test transform it is not, and
+ * throwing here would take down a module whose other exports are being unit
+ * tested, turning a missing convenience into a failed suite.
+ *
+ * @returns {string | null}
+ */
+function conventionalDenylist() {
+  try {
+    return fileURLToPath(new URL('../../_private/.denylist', import.meta.url));
+  } catch {
+    return null;
+  }
+}
 
 const ALLOWED_ABSOLUTE_PREFIXES = ['c:\\program files', 'c:\\programdata', 'c:\\windows'];
 
@@ -97,16 +119,33 @@ export function findViolations(file, content, denylist) {
   return violations;
 }
 
-function loadDenylist() {
-  const index = process.argv.indexOf('--denylist');
-  const path = index === -1 ? process.env.AI_LABS_DENYLIST : process.argv[index + 1];
-  if (!path) return { terms: [], path: null };
-  if (!existsSync(path)) throw new Error(`Denylist not found: ${path}`);
+function readDenylist(path) {
   const terms = readFileSync(path, 'utf8')
     .split(/\r?\n/)
     .map((line) => line.trim().toLowerCase())
     .filter((line) => line.length > 0 && !line.startsWith('#'));
   return { terms, path };
+}
+
+function loadDenylist() {
+  const index = process.argv.indexOf('--denylist');
+  const named = index === -1 ? process.env.AI_LABS_DENYLIST : process.argv[index + 1];
+
+  // A denylist that was asked for by name must exist. Falling back to the
+  // generic rules because a path was mistyped would report a clean repository
+  // on exactly the check the caller went out of their way to request.
+  if (named) {
+    if (!existsSync(named)) throw new Error(`Denylist not found: ${named}`);
+    return readDenylist(named);
+  }
+
+  // Nobody named one, so try the conventional location. This is the difference
+  // between the strongest rule running on every commit and it running only when
+  // someone remembers to export a variable first.
+  const conventional = conventionalDenylist();
+  if (conventional && existsSync(conventional)) return readDenylist(conventional);
+
+  return { terms: [], path: null };
 }
 
 /**
