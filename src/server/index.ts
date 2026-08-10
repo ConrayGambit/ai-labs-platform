@@ -1,15 +1,33 @@
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildApp } from './app.js';
 import { runAgentProcess } from './agent-process.js';
 import type { AgentInvoker } from './council.js';
 import { createDatabase } from './database.js';
+import { resolveAiLabsPaths } from './paths.js';
 
 const host = process.env.ORCHESTRATOR_HOST ?? '127.0.0.1';
 const port = Number(process.env.ORCHESTRATOR_PORT ?? '4317');
-const dataDirectory = resolve(process.env.ORCHESTRATOR_DATA_DIR ?? './data');
-const database = createDatabase(resolve(dataDirectory, 'orchestrator.db'));
+// Walk up to the directory holding package.json. This is correct both for the
+// built output (dist/server/server/index.js) and when running from source under
+// tsx, where the relative depth differs.
+function findRepositoryRoot(startDirectory: string): string {
+  let directory = startDirectory;
+  for (;;) {
+    if (existsSync(resolve(directory, 'package.json'))) return directory;
+    const parent = dirname(directory);
+    if (parent === directory) {
+      throw new Error(`Could not locate the repository root above ${startDirectory}`);
+    }
+    directory = parent;
+  }
+}
+
+const repositoryRoot = findRepositoryRoot(fileURLToPath(new URL('.', import.meta.url)));
+const paths = resolveAiLabsPaths({ repositoryRoot });
+const database = createDatabase(resolve(paths.dataDir, 'orchestrator.db'));
 const invoke: AgentInvoker = async ({ runtime, prompt, projectPath, taskId, runId, options }) => {
   const result = await runAgentProcess({
     runtime,
@@ -34,7 +52,7 @@ let closing = false;
 async function shutdown(signal: string): Promise<void> {
   if (closing) return;
   closing = true;
-  app.log.info({ signal }, 'Shutting down Hermes Orchestrator');
+  app.log.info({ signal }, 'Shutting down AI Labs core');
   await app.close();
   database.close();
 }
@@ -44,8 +62,9 @@ process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
 
 try {
   await app.listen({ host, port });
-  console.log(`Hermes Orchestrator listening at http://${host}:${port}`);
-  console.log(`Local data: ${dataDirectory}`);
+  console.log(`AI Labs core listening at http://${host}:${port}`);
+  console.log(`Data:    ${paths.dataDir}`);
+  console.log(`Profile: ${paths.profileDir}`);
 } catch (error) {
   database.close();
   throw error;
