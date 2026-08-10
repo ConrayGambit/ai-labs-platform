@@ -1,0 +1,13 @@
+title = "AI Labs secret scanning"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Environment-variable references are stored instead of secrets, by design."
+regexes = [
+  '''\$\{[A-Z0-9_]+\}''',
+]
+paths = [
+  '''package-lock\.json''',
+]

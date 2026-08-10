@@ -12,6 +12,14 @@ const ALLOWED_ABSOLUTE_PREFIXES = ['c:\\program files', 'c:\\programdata', 'c:\\
 const ALLOWED_EMAIL_DOMAINS = ['anthropic.com', 'example.com', 'example.org', 'example.net'];
 
 const SKIP_FILES = new Set(['package-lock.json']);
+
+// These two files define and exercise the detection patterns, so they necessarily
+// contain examples of them. Pattern rules are skipped here; the denylist rule is
+// NOT, so a real name still fails the check even in the guard's own source.
+const PATTERN_EXEMPT_FILES = new Set([
+  'scripts/check-no-real-data.mjs',
+  'tests/scripts/check-no-real-data.test.ts',
+]);
 const SKIP_EXTENSIONS = [
   '.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.db', '.woff', '.woff2',
 ];
@@ -29,6 +37,14 @@ const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 export function findViolations(file, content, denylist) {
   const violations = [];
   const add = (rule, match) => violations.push({ file, rule, match });
+
+  if (PATTERN_EXEMPT_FILES.has(file.replace(/\\/g, '/'))) {
+    const lowerExempt = content.toLowerCase();
+    for (const term of denylist) {
+      if (term && lowerExempt.includes(term)) add('denylist-term', term);
+    }
+    return violations;
+  }
 
   for (const match of content.match(PERSONAL_HOME) ?? []) {
     add('personal-home-path', match);

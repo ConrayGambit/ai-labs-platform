@@ -1,0 +1,14 @@
+#!/bin/sh
+# Blocks a commit that would publish a secret or real data.
+set -e
+
+echo "pre-commit: publishable-data guard"
+node scripts/check-no-real-data.mjs
+
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks protect"
+  gitleaks protect --staged --redact --config .gitleaks.toml
+else
+  echo "pre-commit: WARNING - gitleaks is not installed; secret scanning was SKIPPED." >&2
+  echo "pre-commit: install it before pushing to a public remote." >&2
+fi

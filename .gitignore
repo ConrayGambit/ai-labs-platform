@@ -1,9 +1,19 @@
 node_modules/
 dist/
 data/
+profile/
+artifacts/
 .worktrees/
 *.db
 *.db-shm
 *.db-wal
 .env
 .DS_Store
+
+# Private, deployment-specific material. Never committed to the public repository.
+_private/
+.denylist
+gitleaks-report.json
+
+# Design record lives in the private location, not the public repository.
+docs/superpowers/
