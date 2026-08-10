@@ -104,12 +104,77 @@ function trackedFiles() {
     .filter((file) => !SKIP_EXTENSIONS.some((extension) => file.toLowerCase().endsWith(extension)));
 }
 
+const skipPath = (file) =>
+  SKIP_FILES.has(file) || SKIP_EXTENSIONS.some((ext) => file.toLowerCase().endsWith(ext));
+
+/**
+ * Every unique blob ever committed, with the path it was stored under. Deleting a
+ * file does not remove it from history, and a public push publishes every commit,
+ * so the working tree being clean says nothing about what is publishable.
+ *
+ * Deduplicating by blob hash keeps this near-instant: identical content across
+ * many commits is scanned once.
+ */
+function historyBlobs() {
+  // rev-list --objects lists trees with their directory path too, so the object
+  // type has to be resolved before reading. One batch call rather than a failing
+  // cat-file per object.
+  const blobs = new Set();
+  const typeListing = execFileSync(
+    'git',
+    ['cat-file', '--batch-check=%(objectname) %(objecttype)', '--batch-all-objects'],
+    { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+  );
+  for (const line of typeListing.split(/\r?\n/)) {
+    const [sha, type] = line.split(' ');
+    if (type === 'blob') blobs.add(sha);
+  }
+
+  const seen = new Map();
+  const listing = execFileSync('git', ['rev-list', '--objects', '--all'], {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  for (const line of listing.split(/\r?\n/)) {
+    const separator = line.indexOf(' ');
+    if (separator === -1) continue; // commits and root trees carry no path
+    const sha = line.slice(0, separator);
+    const file = line.slice(separator + 1);
+    if (!file || !blobs.has(sha) || skipPath(file) || seen.has(sha)) continue;
+    seen.set(sha, file);
+  }
+  return seen;
+}
+
+function scanHistory(terms) {
+  const violations = [];
+  for (const [sha, file] of historyBlobs()) {
+    let content;
+    try {
+      content = execFileSync('git', ['cat-file', 'blob', sha], {
+        encoding: 'utf8',
+        maxBuffer: 256 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      continue; // unreadable or binary blob
+    }
+    violations.push(...findViolations(file, content, terms));
+  }
+  return violations;
+}
+
 function main() {
   const { terms, path } = loadDenylist();
+  const historyMode = process.argv.includes('--history');
   const violations = [];
-  for (const file of trackedFiles()) {
-    if (!existsSync(file) || statSync(file).isDirectory()) continue;
-    violations.push(...findViolations(file, readFileSync(file, 'utf8'), terms));
+  if (historyMode) {
+    violations.push(...scanHistory(terms));
+  } else {
+    for (const file of trackedFiles()) {
+      if (!existsSync(file) || statSync(file).isDirectory()) continue;
+      violations.push(...findViolations(file, readFileSync(file, 'utf8'), terms));
+    }
   }
   if (violations.length > 0) {
     console.error('Publishable-data check FAILED:\n');
@@ -123,7 +188,8 @@ function main() {
     process.exit(1);
   }
   const note = path ? `${terms.length} private term(s)` : 'no private denylist configured';
-  console.log(`Publishable-data check passed (${note}).`);
+  const scope = historyMode ? 'entire git history' : 'working tree';
+  console.log(`Publishable-data check passed on the ${scope} (${note}).`);
 }
 
 if (process.argv[1]?.endsWith('check-no-real-data.mjs')) {
