@@ -1,6 +1,55 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 
+describe('project owns its repository', () => {
+  let database: OrchestratorDatabase | undefined;
+  afterEach(() => {
+    database?.close();
+    database = undefined;
+  });
+
+  const seedVenture = (db: OrchestratorDatabase) => {
+    const portfolio = db.platform.createPortfolio({ name: 'Portfolio', ownerUserId: 'owner' });
+    return db.platform.createVenture({
+      portfolioId: portfolio.id,
+      name: 'Venture One',
+      kind: 'saas',
+      mission: 'Ship something useful.',
+    });
+  };
+
+  it('stores a repository path against the governed project', () => {
+    database = createDatabase(':memory:');
+    const venture = seedVenture(database);
+    const project = database.platform.createProject({
+      ventureId: venture.id,
+      name: 'Foundation',
+      objective: 'Deliver the first usable release.',
+      successCriteria: ['The owner can approve the plan'],
+      repositoryPath: '/workspaces/example-product',
+    });
+
+    expect(project.repositoryPath).toBe('/workspaces/example-product');
+    expect(database.platform.getProject(project.id)?.repositoryPath).toBe(
+      '/workspaces/example-product',
+    );
+  });
+
+  it('allows a project with no repository at all', () => {
+    database = createDatabase(':memory:');
+    const venture = seedVenture(database);
+    const project = database.platform.createProject({
+      ventureId: venture.id,
+      name: 'Operations',
+      objective: 'Run a continuous operation that builds no software.',
+      successCriteria: ['Work is tracked'],
+    });
+
+    expect(project.repositoryPath).toBeNull();
+    expect(database.platform.getProject(project.id)?.repositoryPath).toBeNull();
+  });
+});
+
 describe('platform repository', () => {
   let database: OrchestratorDatabase | undefined;
 

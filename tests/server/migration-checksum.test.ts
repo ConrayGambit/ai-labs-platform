@@ -92,17 +92,34 @@ describe('built and source builds agree on checksums', () => {
       );
 
       const built = new Database(file);
-      const before = built.prepare('SELECT id, checksum FROM schema_migrations').all();
+      const before = built.prepare('SELECT id, checksum FROM schema_migrations').all() as Array<{
+        id: string;
+        checksum: string;
+      }>;
       built.close();
       expect(before.length).toBeGreaterThan(0);
 
-      // Must not throw: this is the failure the normalisation exists to prevent.
+      // Must not throw: this is the failure the SQL-based checksum exists to
+      // prevent — a database created by `npm start` refusing to open under the
+      // source build.
       createDatabase(file).close();
 
       const after = new Database(file);
-      const afterChecksums = after.prepare('SELECT id, checksum FROM schema_migrations').all();
+      const afterRows = after.prepare('SELECT id, checksum FROM schema_migrations').all() as Array<{
+        id: string;
+        checksum: string;
+      }>;
       after.close();
-      expect(afterChecksums).toEqual(before);
+
+      // Compare only the migrations both builds know about. `dist` may lag source
+      // by a migration or more, and applying a genuinely new one is correct
+      // forward behaviour — the property under test is that the two agree on the
+      // checksum of the SAME migration, not that source adds nothing.
+      const afterById = new Map(afterRows.map((row) => [row.id, row.checksum]));
+      for (const row of before) {
+        expect(afterById.get(row.id)).toBe(row.checksum);
+      }
+      expect(afterRows.length).toBeGreaterThanOrEqual(before.length);
     },
   );
 });

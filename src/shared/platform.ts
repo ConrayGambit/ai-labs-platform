@@ -40,6 +40,15 @@ export interface WorkProject {
   lifecycle: ProjectLifecycle;
   supervisionPolicy: 'project_defined';
   workspaceMode: 'configurable';
+  /**
+   * Absolute path to the repository this project builds in, when it has one.
+   *
+   * A repository is an attribute of a project, not a peer concept: the codebase
+   * previously carried two unrelated notions of "project" — a registered
+   * repository path and a governed initiative — which is why a card could belong
+   * to one and its work happen in the other.
+   */
+  repositoryPath: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -96,6 +105,7 @@ export interface CreateWorkProjectInput {
   objective: string;
   successCriteria: string[];
   constraints?: string[];
+  repositoryPath?: string | null;
 }
 
 export interface ExecutiveSnapshot {

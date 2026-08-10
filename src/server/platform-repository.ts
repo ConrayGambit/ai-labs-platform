@@ -24,6 +24,7 @@ type ProjectRow = {
   id: string; venture_id: string; name: string; objective: string; success_criteria_json: string;
   constraints_json: string; zero_first: number; lifecycle: ProjectLifecycle;
   supervision_policy: WorkProject['supervisionPolicy']; workspace_mode: WorkProject['workspaceMode'];
+  repository_path: string | null;
   created_at: string; updated_at: string;
 };
 type ApprovalRow = {
@@ -85,6 +86,7 @@ const mapProject = (row: ProjectRow): WorkProject => ({
   successCriteria: JSON.parse(row.success_criteria_json) as string[],
   constraints: JSON.parse(row.constraints_json) as string[], zeroFirst: row.zero_first === 1,
   lifecycle: row.lifecycle, supervisionPolicy: row.supervision_policy, workspaceMode: row.workspace_mode,
+  repositoryPath: row.repository_path ?? null,
   createdAt: row.created_at, updatedAt: row.updated_at,
 });
 const mapApproval = (row: ApprovalRow): ApprovalRequest => ({
@@ -162,15 +164,18 @@ export function createPlatformRepository(connection: Database.Database): Platfor
     const project: WorkProject = {
       id: randomUUID(), ventureId: input.ventureId, name: input.name, objective: input.objective,
       successCriteria: input.successCriteria, constraints: input.constraints ?? [], zeroFirst: true,
-      lifecycle: 'draft', supervisionPolicy: 'project_defined', workspaceMode: 'configurable', createdAt: now, updatedAt: now,
+      lifecycle: 'draft', supervisionPolicy: 'project_defined', workspaceMode: 'configurable',
+      repositoryPath: input.repositoryPath ?? null, createdAt: now, updatedAt: now,
     };
     connection.prepare(`
       INSERT INTO platform_projects (
         id, venture_id, name, objective, success_criteria_json, constraints_json,
-        zero_first, lifecycle, supervision_policy, workspace_mode, created_at, updated_at
+        zero_first, lifecycle, supervision_policy, workspace_mode, repository_path,
+        created_at, updated_at
       ) VALUES (
         @id, @ventureId, @name, @objective, @successCriteriaJson, @constraintsJson,
-        @zeroFirst, @lifecycle, @supervisionPolicy, @workspaceMode, @createdAt, @updatedAt
+        @zeroFirst, @lifecycle, @supervisionPolicy, @workspaceMode, @repositoryPath,
+        @createdAt, @updatedAt
       )
     `).run({ ...project, successCriteriaJson: JSON.stringify(project.successCriteria),
       constraintsJson: JSON.stringify(project.constraints), zeroFirst: 1 });

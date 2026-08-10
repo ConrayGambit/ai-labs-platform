@@ -387,4 +387,15 @@ export const MIGRATIONS: Migration[] = [
         WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'owner');
       `,
   },
+  {
+    id: '0006-project-merge',
+    // One project concept. The legacy `projects` table is left in place and
+    // unused rather than dropped: deleting rows a user may still need is not a
+    // migration's decision. A later migration removes it once the desk modules
+    // land and anything worth keeping has been carried across.
+    sql: `
+        ALTER TABLE platform_projects ADD COLUMN repository_path TEXT;
+        CREATE INDEX IF NOT EXISTS platform_projects_venture ON platform_projects(venture_id);
+      `,
+  },
 ];
