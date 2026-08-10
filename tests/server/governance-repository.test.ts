@@ -104,6 +104,39 @@ describe('roles on a card at a gate', () => {
     expect(database!.governance.getBuilder(card.id, 'G1')?.orgAgentId).toBe(builder.id);
   });
 
+  // Found in review: any of G1-G4 was accepted because the CHECK constraint
+  // allows them, producing a role at a gate the ladder does not have — a state
+  // nothing could later read, since every count resolves the gate through the
+  // ladder and threw.
+  it('REFUSES a role at a gate the project ladder does not have', () => {
+    database = createDatabase(':memory:');
+    const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
+    const venture = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'Ops', kind: 'research', mission: 'Run things.',
+    });
+    const project = database.platform.createProject({
+      ventureId: venture.id, name: 'Letters', objective: 'Send them.',
+      successCriteria: ['Sent'], gateLadderId: 'business',
+    });
+    const card = database.work.createCard({ projectId: project.id, title: 'A letter' });
+    const agent = database.createOrgAgent({
+      name: 'Drafter', jobTitle: 'S', department: 'D', jobFunction: 'F', responsibilities: 'R',
+      runtimeId: database.createAgent({
+        name: 'rt', command: 'rt', argsTemplate: ['{prompt}'], promptTransport: 'argument',
+        outputFormat: 'text', versionArgs: ['--version'], timeoutMs: 120_000,
+      }).id,
+      model: 'model-one',
+    });
+
+    // The business ladder is G1 and G4.
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G2', role: 'builder', orgAgentId: agent.id,
+    })).toThrow(/no G2 gate/i);
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G4', role: 'builder', orgAgentId: agent.id,
+    })).not.toThrow();
+  });
+
   it('allows a different builder at a different gate on the same card', () => {
     const { card, builder, otherModel } = seed();
     database!.governance.assignRole({

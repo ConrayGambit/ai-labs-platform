@@ -423,6 +423,29 @@ export function createGovernanceRepository(connection: Database.Database): Gover
           );
         }
 
+        /*
+         * The gate has to be one this project's ladder actually has. Accepting
+         * any of G1-G4 because the CHECK constraint allows them let a role be
+         * assigned at, say, G2 on the business ladder — a state nothing could
+         * later read, because every count and visibility query resolves the
+         * gate through the ladder and threw. Refused at the write, where it can
+         * still be reported, rather than at the read, where it is too late.
+         */
+        const ladderId = connection
+          .prepare(
+            `SELECT p.gate_ladder_id AS ladder FROM cards c
+               JOIN platform_projects p ON p.id = c.project_id
+              WHERE c.id = ?`,
+          )
+          .get(input.cardId) as { ladder: string | null } | undefined;
+        if (!ladderId) throw new Error(`Card not found: ${input.cardId}`);
+        const ladder = getLadder(ladderId.ladder ?? 'product');
+        if (!ladder.gates.some((gate) => gate.id === input.gateId)) {
+          throw new Error(
+            `The ${ladder.label} ladder has no ${input.gateId} gate, so nobody can hold a role at it`,
+          );
+        }
+
         const builder = getBuilder(input.cardId, input.gateId);
         if (input.role === 'builder') {
           if (builder) {

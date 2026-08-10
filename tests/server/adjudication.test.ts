@@ -109,6 +109,34 @@ describe('adjudication', () => {
     })).toThrow(/next step/i);
   });
 
+  // Found in review: a deferral with a next step but no date was accepted, so
+  // "revisit this later" carried no later.
+  it('REFUSES a deferral with no date to revisit it', () => {
+    const { card, builder, reviewerA, reviewerB } = seed();
+    const filed = file(card.id, reviewerA.id, [finding()]);
+    file(card.id, reviewerB.id);
+
+    expect(() => service!.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId: filed.review.findings[0]!.id,
+      outcome: 'deferred', reason: 'Not now.', nextStep: 'Fix in the next slice.',
+      ruledByOrgAgentId: builder.id,
+    })).toThrow(/date to revisit/i);
+  });
+
+  it('accepts a deferral carrying both a next step and a date', () => {
+    const { card, builder, reviewerA, reviewerB } = seed();
+    const filed = file(card.id, reviewerA.id, [finding()]);
+    file(card.id, reviewerB.id);
+
+    const result = service!.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId: filed.review.findings[0]!.id,
+      outcome: 'deferred', reason: 'Not now.', nextStep: 'Fix in the next slice.',
+      deferredUntil: '2026-09-01', ruledByOrgAgentId: builder.id,
+    });
+
+    expect(result.registerEntry).toMatchObject({ deferredUntil: '2026-09-01' });
+  });
+
   it('records an override with the reviewer, priority, reason and residual risk', () => {
     const { card, builder, reviewerA, reviewerB } = seed();
     const filed = file(card.id, reviewerA.id, [finding({ priority: 'P2' })]);

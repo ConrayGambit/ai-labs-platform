@@ -194,8 +194,18 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
           // top rung at all.
           throw new Error('A P0 may not be overridden by the builder; it goes to the owner');
         }
-        if (input.outcome === 'deferred' && !input.nextStep?.trim()) {
-          throw new Error('A deferral needs a reason and a named next step');
+        if (input.outcome === 'deferred') {
+          // "A deferral is an override with a date attached" (spec 20.5). Both
+          // gaps are named at once rather than one per attempt.
+          const missing = [
+            ...(input.nextStep?.trim() ? [] : ['a named next step']),
+            ...(input.deferredUntil?.trim() ? [] : ['a date to revisit it']),
+          ];
+          if (missing.length > 0) {
+            throw new Error(
+              `A deferral needs ${missing.join(' and ')}; without them it is a finding dropped`,
+            );
+          }
         }
 
         // A re-ruling only happens after a contest, and a contested finding is
