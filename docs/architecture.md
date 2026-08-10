@@ -83,7 +83,7 @@ Findings are ranked **P0** to **P4**. The builder rules on each: *adopted*, *def
 
 A run that completes its turn moves its card to the ladder's first gate. A card closes on an inspectable artifact; without one it cannot reach done.
 
-`council.ts` (proposal → critique → synthesis, with a hardcoded coordinator) and `hierarchy.ts` (whole-subtree execution) are retired by this model and are no longer the coordination protocol. Both files remain in the tree behind `/api/tasks/:taskId/council` and `/api/tasks/:taskId/hierarchy`, working against the legacy task tables, and are pending removal. One export outlives them: `roleContext`, which renders an agent's stable identity and is shared with the ACP prompt builder so the two renderings cannot drift.
+`council.ts` (proposal → critique → synthesis, with a hardcoded coordinator) and `hierarchy.ts` (whole-subtree execution) are retired by this model and are no longer the coordination protocol. Both files remain in the tree behind `/api/tasks/:taskId/council` and `/api/tasks/:taskId/hierarchy`, working against the legacy task tables. One export is shared with the new path: `roleContext`, which renders an agent's stable identity and is used by the ACP prompt builder so the two renderings cannot drift.
 
 ## Organizational model
 
