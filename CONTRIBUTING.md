@@ -38,10 +38,19 @@ Operational data and your deployment profile live **outside** this repository, u
 `%LOCALAPPDATA%\AI Labs\` (or `$XDG_DATA_HOME/AI Labs/`). Override with `AI_LABS_DATA_DIR` and
 `AI_LABS_PROFILE_DIR`. A path inside the repository is refused at startup.
 
-## Install gitleaks before pushing
+## Install gitleaks
 
-The pre-commit hook runs a staged secret scan when `gitleaks` is on your PATH, and warns loudly when
-it is not. Install it before pushing to a public remote.
+The pre-commit hook scans staged changes for secrets and **blocks the commit if `gitleaks` cannot be
+found**. It is not optional: a warning that scanning was skipped is a warning nobody reads, and this
+is a public repository.
+
+```bash
+winget install Gitleaks.Gitleaks
+```
+
+The hook does not rely on PATH alone — `scripts/find-gitleaks.mjs` also checks the directories
+winget, scoop and Homebrew install into, because winget commonly leaves the binary off PATH. If your
+install lives somewhere else, set `GITLEAKS_PATH` to the binary.
 
 ## How changes are reviewed
 

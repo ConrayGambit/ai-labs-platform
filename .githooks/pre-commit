@@ -5,10 +5,18 @@ set -e
 echo "pre-commit: publishable-data guard"
 node scripts/check-no-real-data.mjs
 
-if command -v gitleaks >/dev/null 2>&1; then
+# `command -v gitleaks` alone is not enough: winget installs into a per-package
+# directory that is often not on PATH, so the old warning branch meant secret
+# scanning silently never ran. Resolve it properly, and refuse the commit when
+# it genuinely cannot be found — a public repository is not the place to
+# discover that the scanner was skipped.
+if GITLEAKS="$(node scripts/find-gitleaks.mjs)"; then
   echo "pre-commit: gitleaks protect"
-  gitleaks protect --staged --redact --config .gitleaks.toml
+  "$GITLEAKS" protect --staged --redact --config .gitleaks.toml
 else
-  echo "pre-commit: WARNING - gitleaks is not installed; secret scanning was SKIPPED." >&2
-  echo "pre-commit: install it before pushing to a public remote." >&2
+  echo "pre-commit: gitleaks was not found, so this commit is blocked." >&2
+  echo "pre-commit: install it (winget install Gitleaks.Gitleaks), or set" >&2
+  echo "pre-commit: GITLEAKS_PATH to the binary. To commit without scanning," >&2
+  echo "pre-commit: pass --no-verify and understand what that skips." >&2
+  exit 1
 fi
