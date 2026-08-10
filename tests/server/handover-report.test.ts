@@ -62,7 +62,16 @@ describe('actual output, not claims', () => {
 
   it('accepts a shell prompt line', () => {
     expect(containsActualOutput('$ npm run verify\nexit=0')).toBe(true);
-    expect(containsActualOutput('> vitest run\n Tests 326 passed')).toBe(true);
+    // Driveless on purpose: the publishable-data guard rejects a drive path,
+    // and it caught this fixture when it was written with one.
+    expect(containsActualOutput('PS /workspace> npm run verify')).toBe(true);
+  });
+
+  // Found in review: a bare '>' is a Markdown blockquote at least as often as
+  // it is a prompt, so prose could wear one and pass.
+  it('REJECTS a blockquote dressed as a prompt line', () => {
+    expect(containsActualOutput('> All tests passed and the build was green.')).toBe(false);
+    expect(containsActualOutput('> ai-labs-platform@0.1.0 verify')).toBe(false);
   });
 
   it('REJECTS prose that merely begins with a number', () => {
@@ -104,6 +113,33 @@ describe('the gate that requires it', () => {
   it('allows the close once the handover is complete', () => {
     expect(canAdvance({
       card: atG4, ladder: PRODUCT_LADDER, to: 'done', evidence: evidence([]),
+    })).toEqual({ allowed: true });
+  });
+
+  // Found in review: canAdvance exempted every move from a blocked card, so the
+  // policy said a blocked card with no artifact and no handover could be
+  // closed, while moveCard refused the very same move.
+  it('DENIES closing a BLOCKED card that has met none of the requirements', () => {
+    const verdict = canAdvance({
+      card: { status: 'blocked', gateId: 'G2', reviewerCountOverride: null },
+      ladder: PRODUCT_LADDER, to: 'done',
+      evidence: {
+        reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
+        missingSpecificationSections: [], missingHandoverPoints: [...HANDOVER_POINTS],
+      },
+    });
+
+    expect(denial(verdict).reason).toMatch(/artifact|handover/i);
+  });
+
+  it('still lets a blocked card go anywhere that is not done', () => {
+    expect(canAdvance({
+      card: { status: 'blocked', gateId: 'G2', reviewerCountOverride: null },
+      ladder: PRODUCT_LADDER, to: 'in_progress',
+      evidence: {
+        reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
+        missingSpecificationSections: [], missingHandoverPoints: [...HANDOVER_POINTS],
+      },
     })).toEqual({ allowed: true });
   });
 

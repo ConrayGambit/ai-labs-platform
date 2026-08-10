@@ -120,16 +120,27 @@ export function isHandoverPoint(key: string): key is HandoverPoint {
  * requirement, so it is checked literally. A fenced block or a prompt line is
  * pasted output; a sentence is not.
  *
- * A leading digit is deliberately NOT accepted, though it would catch some real
- * output: "326 tests passed and the build was green" is still a claim, and
- * admitting it would readmit exactly what this rule refuses, one character of
- * effort later. The cost of being strict is a writer wrapping their paste in
- * backticks.
+ * Two things are deliberately NOT accepted, though each would catch some real
+ * output.
+ *
+ * A leading digit — "326 tests passed and the build was green" is still a
+ * claim, and admitting it would readmit exactly what this rule refuses one
+ * character of effort later.
+ *
+ * A bare `>` — in Markdown that is a blockquote, so "> All tests passed" sailed
+ * straight through until a review probe fed it exactly that. npm echoes its
+ * scripts with `>` as well, so the cost here is real; it is still the right
+ * trade, because a rule a quotation mark defeats is not a rule. A PowerShell
+ * prompt is still accepted, being unambiguous.
+ *
+ * The cost of being strict is a writer wrapping their paste in backticks.
  */
 export function containsActualOutput(section: string): boolean {
   return section.split('\n').some((line) => {
     const trimmed = line.trim();
-    return trimmed.startsWith('```') || trimmed.startsWith('$') || trimmed.startsWith('>');
+    if (trimmed.startsWith('```')) return true;
+    if (trimmed.startsWith('$')) return true;
+    return /^PS\b.*>/.test(trimmed);
   });
 }
 

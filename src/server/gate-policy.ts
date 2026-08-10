@@ -117,10 +117,17 @@ const gateOf = (ladder: GateLadder, gateId: GateId | null): Gate | null =>
 export function canAdvance(request: AdvanceRequest): AdvanceVerdict {
   const { card, ladder, to, evidence } = request;
 
-  // Becoming blocked, and returning from blocked, are not advances. Requiring
-  // evidence to resume work would strand the card in the one column nobody
-  // wants it to sit in.
-  if (to === 'blocked' || card.status === 'blocked') return { allowed: true };
+  // Becoming blocked is never an advance.
+  if (to === 'blocked') return { allowed: true };
+  /*
+   * Returning from blocked is not an advance either — requiring evidence to
+   * resume work would strand the card in the one column nobody wants it to sit
+   * in. But CLOSING is an advance whatever the card was doing beforehand, and
+   * exempting it here let the policy answer "yes" to closing a blocked card
+   * with no artifact and no handover while moveCard refused the very same move.
+   * A caller who consults the policy should not then be surprised by the write.
+   */
+  if (card.status === 'blocked' && to !== 'done') return { allowed: true };
 
   const destinationGate = gateOf(ladder, to as GateId);
   const isGateDestination = deriveColumns(ladder).some((column) => column.key === to);
