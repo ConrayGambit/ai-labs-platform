@@ -1,0 +1,33 @@
+# Line endings are decided here, not by each contributor's core.autocrlf.
+# Without this file a Windows checkout commits CRLF and a Linux checkout commits
+# LF, and the diff between two contributors is every line of every file.
+
+# Text is stored LF in the repository and checked out LF everywhere.
+* text=auto eol=lf
+
+# Windows shells require CRLF to parse these correctly.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary content — never normalised, never diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary
+*.node binary
+*.db binary
+*.db-shm binary
+*.db-wal binary
+
+# Generated — collapse in pull request diffs and exclude from language stats.
+package-lock.json linguist-generated=true -diff
+vendor/** linguist-vendored=true
