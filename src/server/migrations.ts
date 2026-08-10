@@ -782,4 +782,17 @@ export const MIGRATIONS: Migration[] = [
         END;
       `,
   },
+  {
+    id: '0018-specifications',
+    // One specification card per work card, held as its sections. A card with
+    // no row is missing all thirteen, not none — absence is the incomplete
+    // state, not a neutral one.
+    sql: `
+        CREATE TABLE IF NOT EXISTS card_specifications (
+          card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+          sections_json TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL
+        );
+      `,
+  },
 ];

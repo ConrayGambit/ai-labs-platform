@@ -20,10 +20,10 @@ export const PRODUCT_LADDER: GateLadder = {
   id: 'product',
   label: 'Product and code',
   gates: [
-    { id: 'G1', label: 'Design', reviewerCount: 1, independentReview: true, ownerSignature: false },
-    { id: 'G2', label: 'Slice', reviewerCount: 1, independentReview: true, ownerSignature: false },
-    { id: 'G3', label: 'Pre-merge', reviewerCount: 1, independentReview: true, ownerSignature: true },
-    { id: 'G4', label: 'Pre-deploy', reviewerCount: 1, independentReview: true, ownerSignature: true },
+    { id: 'G1', label: 'Design', reviewerCount: 1, independentReview: true, ownerSignature: false, requiresSpecification: true },
+    { id: 'G2', label: 'Slice', reviewerCount: 1, independentReview: true, ownerSignature: false, requiresSpecification: false },
+    { id: 'G3', label: 'Pre-merge', reviewerCount: 1, independentReview: true, ownerSignature: true, requiresSpecification: false },
+    { id: 'G4', label: 'Pre-deploy', reviewerCount: 1, independentReview: true, ownerSignature: true, requiresSpecification: false },
   ],
 };
 
@@ -31,8 +31,8 @@ export const BUSINESS_LADDER: GateLadder = {
   id: 'business',
   label: 'Business and operations',
   gates: [
-    { id: 'G1', label: 'Draft review', reviewerCount: 1, independentReview: false, ownerSignature: false },
-    { id: 'G4', label: 'Pre-send', reviewerCount: 0, independentReview: false, ownerSignature: true },
+    { id: 'G1', label: 'Draft review', reviewerCount: 1, independentReview: false, ownerSignature: false, requiresSpecification: false },
+    { id: 'G4', label: 'Pre-send', reviewerCount: 0, independentReview: false, ownerSignature: true, requiresSpecification: false },
   ],
 };
 
@@ -148,6 +148,16 @@ export function canAdvance(request: AdvanceRequest): AdvanceVerdict {
         reason:
           `Gate ${currentGate.id} ${currentGate.label} needs ${required} review(s); ` +
           `${evidence.reviewsFiled} of ${required} filed.`,
+      };
+    }
+    if (currentGate.requiresSpecification && evidence.missingSpecificationSections.length > 0) {
+      // If the card cannot be completed, the feature is not understood well
+      // enough to build (spec 20.5). Every gap is named at once.
+      return {
+        allowed: false,
+        reason:
+          `Gate ${currentGate.id} needs a complete feature specification; still missing: ` +
+          `${evidence.missingSpecificationSections.join(', ')}.`,
       };
     }
     if (currentGate.ownerSignature && !evidence.ownerDecision) {

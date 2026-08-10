@@ -2,8 +2,10 @@ import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 import { canAdvance, PRODUCT_LADDER, columnKeyFor, deriveColumns } from '../../src/server/gate-policy.js';
+import { SPECIFICATION_SECTIONS } from '../../src/server/governance-policy.js';
 import { createRunSupervisor, type RunSupervisor } from '../../src/server/run-supervisor.js';
 import type { SessionUpdate } from '../../src/shared/acp.js';
+import { denial } from '../helpers/verdict.js';
 
 
 const FAKE_AGENT = resolve('tests/fixtures/fake-acp-agent.mjs');
@@ -139,14 +141,34 @@ describe('the vertical slice', () => {
     expect(columnKeyFor(atGate)).toBe('G1');
 
     // 9. The agent may not close its own work. No artifact, no review, no pass.
+    const missing = database.governance.missingSpecificationSections(card.id);
     const denied = canAdvance({
       card: atGate,
       ladder: PRODUCT_LADDER,
       to: 'done',
-      evidence: { reviewsFiled: 0, ownerDecision: false, artifactCount: 0 },
+      evidence: {
+        reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
+        missingSpecificationSections: missing,
+      },
     });
-    expect(denied.allowed).toBe(false);
-    expect(denied.reason).toMatch(/G1/);
+    expect(denial(denied).reason).toMatch(/G1/);
+
+    // 9b. Nor may it leave G1 on a specification nobody wrote.
+    expect(missing).toHaveLength(13);
+    const withReview = canAdvance({
+      card: atGate, ladder: PRODUCT_LADDER, to: 'G2',
+      evidence: {
+        reviewsFiled: 1, ownerDecision: false, artifactCount: 1,
+        missingSpecificationSections: missing,
+      },
+    });
+    expect(denial(withReview).reason).toMatch(/specification/i);
+    database.governance.saveSpecification({
+      cardId: card.id,
+      sections: Object.fromEntries(
+        SPECIFICATION_SECTIONS.map((section) => [section, `Written: ${section}.`]),
+      ),
+    });
 
     // 10. With something to inspect and a review filed, the gate opens.
     database.work.attachArtifact({
@@ -158,7 +180,10 @@ describe('the vertical slice', () => {
       card: atGate,
       ladder: PRODUCT_LADDER,
       to: 'G2',
-      evidence: { reviewsFiled: 1, ownerDecision: false, artifactCount: 1 },
+      evidence: {
+        reviewsFiled: 1, ownerDecision: false, artifactCount: 1,
+        missingSpecificationSections: database.governance.missingSpecificationSections(card.id),
+      },
     });
     expect(allowed).toEqual({ allowed: true });
 

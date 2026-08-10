@@ -143,6 +143,7 @@ export function registerWorkApi(
         reviewsFiled: 0,
         ownerDecision: false,
         artifactCount: database.work.listArtifacts(card.id).length,
+        missingSpecificationSections: database.governance.missingSpecificationSections(card.id),
       },
     });
     // The gate is enforced here, not in the client. A board that only checks in

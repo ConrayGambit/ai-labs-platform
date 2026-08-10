@@ -17,6 +17,12 @@ import {
 } from '../shared/governance.js';
 import { effectiveReviewerCount, type GateId } from '../shared/work.js';
 import { getLadder } from './gate-policy.js';
+import {
+  isSpecificationSection,
+  specificationIsComplete,
+  type SpecificationSection,
+  type SpecificationSections,
+} from './governance-policy.js';
 
 interface AssignmentRow {
   id: string;
@@ -99,6 +105,11 @@ export interface GovernanceRepository {
   /** Corrects an entry by adding a new one and marking the original superseded. */
   supersedeOverride(input: SupersedeOverrideInput): OverrideEntry;
   listOverrides(filter: { cardId?: string }): OverrideEntry[];
+  /** Merges sections into the card's specification. Never replaces it wholesale. */
+  saveSpecification(input: { cardId: string; sections: SpecificationSections }): CardSpecification;
+  getSpecification(cardId: string): CardSpecification | null;
+  /** Sections still unwritten. A card with no specification is missing all of them. */
+  missingSpecificationSections(cardId: string): SpecificationSection[];
   /** Sets when an outstanding reviewer stops being able to seal the gate. */
   setReviewDeadline(input: {
     cardId: string; gateId: GateId; orgAgentId: string; deadlineAt: string | null;
@@ -155,6 +166,12 @@ const mapReview = (row: ReviewRow, findings: Finding[]): Review => ({
   supersededByReviewId: row.superseded_by_review_id,
   filedAt: row.filed_at,
 });
+
+export interface CardSpecification {
+  cardId: string;
+  sections: SpecificationSections;
+  updatedAt: string;
+}
 
 export interface AppendOverrideInput {
   findingId: string | null;
@@ -360,6 +377,19 @@ export function createGovernanceRepository(connection: Database.Database): Gover
         connection.prepare('SELECT * FROM override_register WHERE id = ?').get(id) as OverrideRow,
       );
     })();
+
+  const getSpecification = (cardId: string): CardSpecification | null => {
+    const row = connection
+      .prepare('SELECT * FROM card_specifications WHERE card_id = ?')
+      .get(cardId) as { card_id: string; sections_json: string; updated_at: string } | undefined;
+    return row
+      ? {
+        cardId: row.card_id,
+        sections: JSON.parse(row.sections_json) as SpecificationSections,
+        updatedAt: row.updated_at,
+      }
+      : null;
+  };
 
   const requireReview = (reviewId: string): Review => {
     const row = selectReview.get(reviewId) as ReviewRow | undefined;
@@ -606,6 +636,38 @@ export function createGovernanceRepository(connection: Database.Database): Gover
         return correction;
       })();
     },
+
+    saveSpecification(input) {
+      return connection.transaction((): CardSpecification => {
+        for (const key of Object.keys(input.sections)) {
+          if (!isSpecificationSection(key)) {
+            // A typo that silently created a fourteenth section would leave the
+            // real one blank while the card looked answered.
+            throw new Error(`"${key}" is not a specification section`);
+          }
+        }
+        const existing = getSpecification(input.cardId);
+        // Merge, never replace: writing one section must not wipe the twelve
+        // already written.
+        const sections = { ...existing?.sections, ...input.sections };
+        connection.prepare(`
+          INSERT INTO card_specifications (card_id, sections_json, updated_at)
+          VALUES (@cardId, @sectionsJson, @updatedAt)
+          ON CONFLICT(card_id) DO UPDATE SET
+            sections_json = excluded.sections_json, updated_at = excluded.updated_at
+        `).run({
+          cardId: input.cardId,
+          sectionsJson: JSON.stringify(sections),
+          updatedAt: new Date().toISOString(),
+        });
+        return getSpecification(input.cardId)!;
+      })();
+    },
+
+    getSpecification,
+
+    missingSpecificationSections: (cardId) =>
+      specificationIsComplete(getSpecification(cardId)?.sections ?? {}).missing,
 
     listOverrides(filter) {
       const rows = filter.cardId

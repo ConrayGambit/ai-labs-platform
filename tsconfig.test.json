@@ -1,0 +1,24 @@
+{
+  // Type-checks the server tests, which neither other config covered:
+  // tsconfig.json includes only tests/web, and tsconfig.server.json excludes
+  // tests so the build does not emit them into dist.
+  //
+  // Vitest transpiles without type-checking, so until this existed a test could
+  // build a structurally invalid object and pass — as two did, saved only by
+  // the code path they happened not to reach. A required field is only a
+  // constraint where a compiler is looking.
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Nothing is emitted, so rootDir only needs to span what is checked.
+    "rootDir": ".",
+    // One test imports the guard script, which is .mjs by design.
+    "allowJs": true,
+    "checkJs": false,
+    "types": ["node"]
+  },
+  // tests/web is already covered by tsconfig.json, which carries the JSX
+  // settings. This config covers what nothing else did.
+  "include": ["src/**/*.ts", "tests/server/**/*.ts", "tests/scripts/**/*.ts", "tests/helpers/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

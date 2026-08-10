@@ -122,6 +122,13 @@ export interface Gate {
   independentReview: boolean;
   /** When true, the owner must personally record a decision. */
   ownerSignature: boolean;
+  /**
+   * When true, a card may not LEAVE this gate until its feature specification
+   * card is complete. Per-gate rather than global: G1 on the business ladder is
+   * a draft review, and demanding thirteen engineering sections of a letter is
+   * how a gate gets worked around rather than followed.
+   */
+  requiresSpecification: boolean;
 }
 
 export interface GateLadder {
@@ -149,6 +156,15 @@ export interface AdvanceEvidence {
   reviewsFiled: number;
   ownerDecision: boolean;
   artifactCount: number;
+  /**
+   * Specification sections still unwritten. Empty means complete.
+   *
+   * Required rather than optional on purpose: every route that advances a card
+   * has to account for it, and the compiler says so. An optional field is a
+   * field a new call site forgets, which is precisely how a rule ends up
+   * enforced on one path and not another.
+   */
+  missingSpecificationSections: readonly string[];
 }
 
 /**

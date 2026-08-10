@@ -38,3 +38,50 @@ export function worstPriority(priorities: readonly FindingPriority[]): FindingPr
   }
   return worst;
 }
+
+/**
+ * The thirteen sections of a feature specification card (spec 20.5).
+ *
+ * Ordered keys rather than free text, so "the card is incomplete" is a
+ * computable fact instead of a judgement. The spec fixes the count and
+ * describes the contents; this list is the platform's reading of it, confirmed
+ * by the owner, and is the single place to correct should the operating
+ * protocol enumerate them differently.
+ */
+export const SPECIFICATION_SECTIONS = [
+  'problem',               // what is wrong today, in the owner's words
+  'outcome',               // what is true when this is done
+  'acceptance_criteria',   // demonstrable, on synthetic fixtures
+  'scope',                 // what this includes
+  'out_of_scope',          // what it deliberately does not
+  'constraints',           // limits that are not negotiable
+  'interfaces',            // what it consumes and what it produces
+  'data_and_migrations',   // schema changes and their rollback
+  'permissions_and_audit', // who may do what, and what is recorded
+  'failure_modes',         // how it fails, and what happens then
+  'verification',          // how it will be proven, including negative tests
+  'rollout_and_rollback',  // how it lands and how it is undone
+  'open_questions',        // what is not yet decided, named
+] as const;
+
+export type SpecificationSection = (typeof SPECIFICATION_SECTIONS)[number];
+
+export type SpecificationSections = Partial<Record<SpecificationSection, string>>;
+
+export function isSpecificationSection(key: string): key is SpecificationSection {
+  return (SPECIFICATION_SECTIONS as readonly string[]).includes(key);
+}
+
+/**
+ * Which sections are still unwritten.
+ *
+ * Every missing section is named, never just the first: a writer fixing them
+ * one round-trip at a time is a writer who gives up. Whitespace counts as
+ * missing, because an empty heading is not an answer.
+ */
+export function specificationIsComplete(
+  sections: SpecificationSections,
+): { complete: boolean; missing: SpecificationSection[] } {
+  const missing = SPECIFICATION_SECTIONS.filter((key) => !sections[key]?.trim());
+  return { complete: missing.length === 0, missing: [...missing] };
+}

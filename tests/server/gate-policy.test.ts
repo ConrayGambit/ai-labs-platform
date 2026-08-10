@@ -7,8 +7,14 @@ import {
   deriveColumns,
 } from '../../src/server/gate-policy.js';
 import { effectiveReviewerCount, type AdvanceEvidence } from '../../src/shared/work.js';
+import { denial } from '../helpers/verdict.js';
 
-const NO_EVIDENCE: AdvanceEvidence = { reviewsFiled: 0, ownerDecision: false, artifactCount: 0 };
+// No reviews, no signature, no artifact — but a complete specification, so
+// every test below is about the rule it names rather than tripping on this one.
+// The specification rule has its own suite.
+const NO_EVIDENCE: AdvanceEvidence = {
+  reviewsFiled: 0, ownerDecision: false, artifactCount: 0, missingSpecificationSections: [],
+};
 
 describe('gate ladders as policy data', () => {
   it('ships a product ladder of four gates, each at one reviewer', () => {
@@ -87,9 +93,8 @@ describe('what a card may do next', () => {
     const verdict = canAdvance({
       card: atGate('G1'), ladder: PRODUCT_LADDER, to: 'G2', evidence: NO_EVIDENCE,
     });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toMatch(/G1/);
-    expect(verdict.reason).toMatch(/0 of 1/);
+    expect(denial(verdict).reason).toMatch(/G1/);
+    expect(denial(verdict).reason).toMatch(/0 of 1/);
   });
 
   it('allows leaving a gate once the required reviews are filed', () => {
@@ -109,8 +114,7 @@ describe('what a card may do next', () => {
       to: 'G2',
       evidence: { ...NO_EVIDENCE, reviewsFiled: 1, artifactCount: 1 },
     });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toMatch(/1 of 2/);
+    expect(denial(verdict).reason).toMatch(/1 of 2/);
   });
 
   it('DENIES closing a card with nothing to inspect', () => {
@@ -118,10 +122,9 @@ describe('what a card may do next', () => {
       card: atGate('G4'),
       ladder: PRODUCT_LADDER,
       to: 'done',
-      evidence: { reviewsFiled: 9, ownerDecision: true, artifactCount: 0 },
+      evidence: { ...NO_EVIDENCE, reviewsFiled: 9, ownerDecision: true, artifactCount: 0 },
     });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toMatch(/artifact/i);
+    expect(denial(verdict).reason).toMatch(/artifact/i);
   });
 
   it('DENIES passing a gate the owner must sign without the owner having signed', () => {
@@ -129,10 +132,9 @@ describe('what a card may do next', () => {
       card: atGate('G3'),
       ladder: PRODUCT_LADDER,
       to: 'G4',
-      evidence: { reviewsFiled: 1, ownerDecision: false, artifactCount: 1 },
+      evidence: { ...NO_EVIDENCE, reviewsFiled: 1, ownerDecision: false, artifactCount: 1 },
     });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toMatch(/owner/i);
+    expect(denial(verdict).reason).toMatch(/owner/i);
   });
 
   it('lets a blocked card return to work at any time', () => {
@@ -171,7 +173,6 @@ describe('what a card may do next', () => {
       to: 'G2',
       evidence: NO_EVIDENCE,
     });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toMatch(/business/i);
+    expect(denial(verdict).reason).toMatch(/business/i);
   });
 });
