@@ -14,6 +14,10 @@ one lower-case term per line. The guard reads `../_private/.denylist`, a sibling
 without being asked, so the strongest rule runs on every commit instead of only when someone
 remembers to export a variable first.
 
+That sibling is located from the checkout's shared git directory, not from where the guard happens
+to be started or where its own file sits. A linked worktree therefore reads the **same** denylist as
+the main checkout, rather than looking for one beside the worktree and finding nothing.
+
 To keep it elsewhere, name it:
 
 ```bash
@@ -26,7 +30,19 @@ generic rules, because a mistyped path that reports a clean repository is precis
 this check exists to prevent.
 
 With no denylist at all — which is every clone outside your own deployment — the guard still
-enforces its generic rules: personal home paths, arbitrary absolute paths, real email addresses.
+enforces its generic rules: personal home paths, arbitrary absolute paths, real email addresses. It
+says so on stderr and names every location it looked in, because "no denylist configured" is not a
+result to read past: it means the one rule that catches real proper nouns did not run.
+
+If your deployment always has a denylist, say so, and a run that cannot find one fails instead of
+falling back to the weaker rule set:
+
+```bash
+export AI_LABS_REQUIRE_DENYLIST=1
+```
+
+Leave it unset in a clone that legitimately has no denylist — that is why it is opt-in rather than
+the default.
 
 ## Getting set up
 

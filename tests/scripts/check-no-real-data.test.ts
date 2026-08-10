@@ -1,5 +1,10 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { findViolations } from '../../scripts/check-no-real-data.mjs';
+import {
+  denylistCandidates,
+  findViolations,
+  requiresDenylist,
+} from '../../scripts/check-no-real-data.mjs';
 
 describe('no-real-data guard', () => {
   it('flags a personal Windows home path', () => {
@@ -62,5 +67,75 @@ describe('no-real-data guard', () => {
 
   it('passes clean content', () => {
     expect(findViolations('src/a.ts', 'export const value = 1;', ['acmecorp'])).toEqual([]);
+  });
+});
+
+// Path arithmetic only — no file is read, so these run the same everywhere.
+// Built with path.join from a resolved base so the expectations hold on both
+// separators rather than encoding one platform's.
+describe('conventional denylist location', () => {
+  const checkout = path.resolve('checkouts', 'app');
+  const gitCommonDir = path.join(checkout, '.git');
+  const sibling = path.join(path.dirname(checkout), '_private', '.denylist');
+
+  const mainScripts = path.join(checkout, 'scripts');
+  // A linked worktree puts the same script two directories deeper.
+  const worktreeScripts = path.join(checkout, '.claude', 'worktrees', 'wt-1', 'scripts');
+
+  it('resolves the sibling of the checkout from the main checkout', () => {
+    expect(denylistCandidates(mainScripts, gitCommonDir)[0]).toBe(sibling);
+  });
+
+  it('resolves the same denylist from inside a worktree as from the main checkout', () => {
+    // The defect: the script sits two levels deeper in a worktree, so a hop
+    // relative to the script landed inside the worktrees directory and found
+    // nothing. A worktree shares the main checkout's git directory, so that is
+    // what both must be measured from.
+    expect(denylistCandidates(worktreeScripts, gitCommonDir)[0]).toBe(sibling);
+    expect(denylistCandidates(worktreeScripts, gitCommonDir)[0]).toBe(
+      denylistCandidates(mainScripts, gitCommonDir)[0],
+    );
+  });
+
+  it('still finds the denylist from the main checkout with no git directory known', () => {
+    expect(denylistCandidates(mainScripts, null)).toEqual([sibling]);
+  });
+
+  it('offers no correct candidate for a worktree with no git directory known', () => {
+    // Pins why the git lookup is load-bearing rather than a nicety: the
+    // script-relative hop alone cannot reach the denylist from a worktree.
+    // Whoever deletes that lookup should fail this test, not ship a silent pass.
+    expect(denylistCandidates(worktreeScripts, null)).not.toContain(sibling);
+  });
+
+  it('keeps the git-derived candidate ahead of the script-relative one', () => {
+    const candidates = denylistCandidates(worktreeScripts, gitCommonDir);
+    expect(candidates[0]).toBe(sibling);
+    expect(candidates.length).toBeGreaterThan(1);
+  });
+
+  it('lists one candidate when both derivations agree', () => {
+    expect(denylistCandidates(mainScripts, gitCommonDir)).toEqual([sibling]);
+  });
+});
+
+describe('denylist requirement', () => {
+  it('is off unless asked for, so a clone with no denylist still passes', () => {
+    expect(requiresDenylist([], {})).toBe(false);
+  });
+
+  it('is on with the flag', () => {
+    expect(requiresDenylist(['--require-denylist'], {})).toBe(true);
+  });
+
+  it('is on with the environment variable', () => {
+    expect(requiresDenylist([], { AI_LABS_REQUIRE_DENYLIST: '1' })).toBe(true);
+    expect(requiresDenylist([], { AI_LABS_REQUIRE_DENYLIST: 'TRUE' })).toBe(true);
+  });
+
+  it('treats an explicit off value as off rather than as merely set', () => {
+    expect(requiresDenylist([], { AI_LABS_REQUIRE_DENYLIST: '0' })).toBe(false);
+    expect(requiresDenylist([], { AI_LABS_REQUIRE_DENYLIST: 'false' })).toBe(false);
+    expect(requiresDenylist([], { AI_LABS_REQUIRE_DENYLIST: '' })).toBe(false);
   });
 });
