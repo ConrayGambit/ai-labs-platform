@@ -48,9 +48,11 @@ is a public repository.
 winget install Gitleaks.Gitleaks
 ```
 
-The hook does not rely on PATH alone — `scripts/find-gitleaks.mjs` also checks the directories
-winget, scoop and Homebrew install into, because winget commonly leaves the binary off PATH. If your
-install lives somewhere else, set `GITLEAKS_PATH` to the binary.
+The hook does not rely on PATH alone. `scripts/find-gitleaks.mjs` also checks the directories
+winget, scoop, chocolatey and Homebrew install into, because a shell started **before** the install
+still carries the old PATH — an editor terminal or a git GUI left open across an install will not
+see a perfectly good gitleaks. That is not hypothetical: it is how this hook was found to have been
+skipping scans. If your install lives somewhere else again, set `GITLEAKS_PATH` to the binary.
 
 ## How changes are reviewed
 

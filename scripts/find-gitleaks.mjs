@@ -2,11 +2,10 @@
 // Prints the path to a usable gitleaks, or exits 1 if there is none.
 //
 // The pre-commit hook used a bare `command -v gitleaks` and degraded to a
-// warning when that missed. On Windows that is the common case rather than the
-// exception: winget installs the binary into a per-package directory and does
-// not always leave a shim on PATH, so secret scanning was skipped on every
-// commit while the hook reported success. Look in the places an installer
-// actually puts it before concluding it is absent.
+// warning when that missed. A shell started before the install still carries
+// the old PATH, so a correctly installed gitleaks looked absent and scanning
+// was skipped on every commit while the hook reported success. Look in the
+// places an installer actually puts it before concluding it is missing.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
