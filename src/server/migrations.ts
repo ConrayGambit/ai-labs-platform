@@ -4,12 +4,39 @@ import type Database from 'better-sqlite3';
 export interface Migration {
   /** Ordered, stable identifier. Never renamed after it has been applied anywhere. */
   id: string;
-  up: (connection: Database.Database) => void;
+  /**
+   * The statements this migration applies. This string IS the migration's
+   * identity: it is what gets checksummed.
+   */
+  sql: string;
+  /**
+   * Conditional work that cannot be expressed as static SQL — column backfills
+   * that depend on the schema already present, since SQLite has no
+   * `ADD COLUMN IF NOT EXISTS`.
+   *
+   * Deliberately NOT checksummed, so it must be idempotent and must not change
+   * the meaning of `sql`. Anything that alters meaning belongs in a new migration.
+   */
+  post?: (connection: Database.Database) => void;
 }
 
-/** Detects a migration body edited after it was applied, which silently diverges databases. */
+/**
+ * Detects a migration edited after it was applied, which silently diverges
+ * databases.
+ *
+ * Hashes the SQL text, never the function source. `Function.prototype.toString`
+ * returns the text as written, and the TypeScript compiler both re-indents it and
+ * strips type annotations — so a checksum over a function body differs between the
+ * built server (`npm start`) and the source build (`npm run dev`, vitest), and a
+ * database created by one refuses to open under the other. A template literal is
+ * preserved verbatim through compilation; a function body is not.
+ *
+ * Whitespace is normalised so reformatting is not mistaken for a change of meaning.
+ *
+ * Guarded by tests/server/migration-checksum.test.ts.
+ */
 function checksum(migration: Migration): string {
-  return createHash('sha256').update(migration.up.toString()).digest('hex');
+  return createHash('sha256').update(migration.sql.replace(/\s+/g, ' ').trim()).digest('hex');
 }
 
 /**
@@ -47,7 +74,8 @@ export function applyMigrations(
       continue;
     }
     connection.transaction(() => {
-      migration.up(connection);
+      connection.exec(migration.sql);
+      migration.post?.(connection);
       record.run(migration.id, digest, new Date().toISOString());
     })();
     applied.push(migration.id);
@@ -65,8 +93,7 @@ export function applyMigrations(
 export const MIGRATIONS: Migration[] = [
   {
     id: '0001-baseline',
-    up: (connection) => {
-      connection.exec(`
+    sql: `
         CREATE TABLE IF NOT EXISTS agents (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
@@ -201,9 +228,10 @@ export const MIGRATIONS: Migration[] = [
         );
 
         CREATE INDEX IF NOT EXISTS messages_run_timeline ON messages(run_id, created_at);
-      `);
-
-      // Column backfills for databases created before these columns existed.
+      `,
+    // Column backfills for databases created before these columns existed.
+    // Idempotent and additive: SQLite has no ADD COLUMN IF NOT EXISTS.
+    post: (connection) => {
       const hasColumn = (table: string, column: string): boolean => {
         const columns = connection.pragma(`table_info(${table})`) as Array<{ name: string }>;
         return columns.some(({ name }) => name === column);
@@ -250,8 +278,7 @@ export const MIGRATIONS: Migration[] = [
   },
   {
     id: '0002-identity',
-    up: (connection) => {
-      connection.exec(`
+    sql: `
         CREATE TABLE IF NOT EXISTS users (
           id TEXT PRIMARY KEY,
           display_name TEXT NOT NULL,
@@ -274,13 +301,11 @@ export const MIGRATIONS: Migration[] = [
 
         CREATE INDEX IF NOT EXISTS user_venture_grants_venture
           ON user_venture_grants(venture_id);
-      `);
-    },
+      `,
   },
   {
     id: '0003-org-tenure',
-    up: (connection) => {
-      connection.exec(`
+    sql: `
         CREATE TABLE IF NOT EXISTS departments (
           id TEXT PRIMARY KEY,
           venture_id TEXT NOT NULL,
@@ -304,24 +329,20 @@ export const MIGRATIONS: Migration[] = [
 
         -- The seeded executive team is permanent staff, in existing databases too.
         UPDATE org_agents SET tenure = 'permanent' WHERE id LIKE 'exec-%';
-      `);
-    },
+      `,
   },
   {
     id: '0003b-reseed-markers',
-    up: (connection) => {
-      connection.exec(`
+    sql: `
         -- Seeding updates doctrine text only where the owner has not edited it,
         -- and never touches model, speed, effort or runtime after first insert.
         ALTER TABLE org_agents ADD COLUMN doctrine_edited_at TEXT;
         ALTER TABLE org_agents ADD COLUMN tuning_edited_at TEXT;
-      `);
-    },
+      `,
   },
   {
     id: '0003c-org-graph',
-    up: (connection) => {
-      connection.exec(`
+    sql: `
         ALTER TABLE org_agents ADD COLUMN reports_to_user_id TEXT REFERENCES users(id);
 
         -- The Chief of Staff becomes a coordinating layer rather than a peer.
@@ -329,13 +350,11 @@ export const MIGRATIONS: Migration[] = [
            SET manager_id = 'exec-chief-of-staff'
          WHERE id IN ('exec-cto', 'exec-cmo', 'exec-cdo')
            AND manager_id = 'exec-ceo';
-      `);
-    },
+      `,
   },
   {
     id: '0004-platform-foundation',
-    up: (connection) => {
-      connection.exec(`
+    sql: `
         CREATE TABLE IF NOT EXISTS platform_portfolios (
           id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL,
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -396,7 +415,6 @@ export const MIGRATIONS: Migration[] = [
           owner_user_id TEXT PRIMARY KEY,
           portfolio_id TEXT NOT NULL UNIQUE REFERENCES platform_portfolios(id) ON DELETE CASCADE
         );
-      `);
-    },
+      `,
   },
 ];

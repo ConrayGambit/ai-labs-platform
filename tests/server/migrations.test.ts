@@ -11,7 +11,7 @@ describe('migration ledger', () => {
 
   const widget: Migration = {
     id: '9001-widget',
-    up: (db) => db.exec('CREATE TABLE widget (id TEXT PRIMARY KEY)'),
+    sql: 'CREATE TABLE widget (id TEXT PRIMARY KEY)',
   };
 
   it('applies a migration once and records it', () => {
@@ -26,7 +26,7 @@ describe('migration ledger', () => {
     connection = new Database(':memory:');
     const second: Migration = {
       id: '9002-widget-name',
-      up: (db) => db.exec('ALTER TABLE widget ADD COLUMN name TEXT'),
+      sql: 'ALTER TABLE widget ADD COLUMN name TEXT',
     };
     expect(applyMigrations(connection, [widget, second])).toEqual([
       '9001-widget',
@@ -39,7 +39,7 @@ describe('migration ledger', () => {
     applyMigrations(connection, [widget]);
     const edited: Migration = {
       id: '9001-widget',
-      up: (db) => db.exec('CREATE TABLE widget (id TEXT PRIMARY KEY, extra TEXT)'),
+      sql: 'CREATE TABLE widget (id TEXT PRIMARY KEY, extra TEXT)',
     };
     expect(() => applyMigrations(connection!, [edited])).toThrow(/checksum/i);
   });
@@ -48,10 +48,7 @@ describe('migration ledger', () => {
     connection = new Database(':memory:');
     const broken: Migration = {
       id: '9003-broken',
-      up: (db) => {
-        db.exec('CREATE TABLE ok_so_far (id TEXT)');
-        db.exec('THIS IS NOT SQL');
-      },
+      sql: 'CREATE TABLE ok_so_far (id TEXT); THIS IS NOT SQL;',
     };
     expect(() => applyMigrations(connection!, [broken])).toThrow();
     const applied = connection.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as {
