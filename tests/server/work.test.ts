@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
+import { columnKeyFor, PRODUCT_LADDER } from '../../src/server/gate-policy.js';
 import type { WorkProject } from '../../src/shared/platform.js';
+import { effectiveReviewerCount } from '../../src/shared/work.js';
 
 describe('the card model, the owner notes and the activity log', () => {
   let database: OrchestratorDatabase | undefined;
@@ -104,7 +106,7 @@ describe('the card model, the owner notes and the activity log', () => {
     expect([first.position, second.position, third.position]).toEqual([0, 1, 2]);
 
     const moved = database.work.moveCard({
-      cardId: third.id, status: 'ready', position: 0, userId: 'owner',
+      cardId: third.id, to: 'ready', position: 0, userId: 'owner',
     });
 
     expect(moved).toMatchObject({ status: 'ready', position: 0 });
@@ -122,7 +124,7 @@ describe('the card model, the owner notes and the activity log', () => {
     const project = seedProject();
     const a = database.work.createCard({ projectId: project.id, title: 'A' });
     const b = database.work.createCard({ projectId: project.id, title: 'B' });
-    database.work.moveCard({ cardId: b.id, status: 'backlog', position: 0, userId: 'owner' });
+    database.work.moveCard({ cardId: b.id, to: 'backlog', position: 0, userId: 'owner' });
 
     expect(database.work.listCards(project.id).map((card) => card.title)).toEqual(['B', 'A']);
     expect(database.work.getCard(a.id)?.position).toBe(1);
@@ -142,6 +144,59 @@ describe('the card model, the owner notes and the activity log', () => {
     expect(activity.map((entry) => entry.kind)).toEqual(['created', 'notes_changed', 'commented']);
     expect(activity.map((entry) => entry.actorType)).toEqual(['user', 'user', 'org_agent']);
     expect(activity.every((entry) => entry.createdAt !== '')).toBe(true);
+  });
+
+  it('puts a card into review at the gate it was moved to', () => {
+    database = createDatabase(':memory:');
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+
+    const moved = database.work.moveCard({
+      cardId: card.id, to: 'G2', position: 0, userId: 'owner',
+    });
+
+    // A gate column is not a card status. The card is in review, at G2.
+    expect(moved).toMatchObject({ status: 'review', gateId: 'G2' });
+    expect(columnKeyFor(moved)).toBe('G2');
+
+    const back = database.work.moveCard({
+      cardId: card.id, to: 'in_progress', position: 0, userId: 'owner',
+    });
+    expect(back).toMatchObject({ status: 'in_progress', gateId: null });
+  });
+
+  it('records who raised the reviewer count on a card, and why', () => {
+    database = createDatabase(':memory:');
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    expect(card.reviewerCountOverride).toBeNull();
+
+    const raised = database.work.raiseReviewerCount({
+      cardId: card.id, count: 2, reason: 'Touches the permission model.', userId: 'owner',
+    });
+
+    expect(raised).toMatchObject({
+      reviewerCountOverride: 2,
+      reviewerRaiseReason: 'Touches the permission model.',
+      reviewerRaisedByUserId: 'owner',
+    });
+    // The raise is what the gate policy then reads.
+    expect(effectiveReviewerCount(PRODUCT_LADDER.gates[0]!, {
+      card: raised.reviewerCountOverride,
+    })).toBe(2);
+  });
+
+  it('REFUSES a reviewer raise with no reason recorded', () => {
+    database = createDatabase(':memory:');
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+
+    expect(() =>
+      database!.work.raiseReviewerCount({
+        cardId: card.id, count: 2, reason: '   ', userId: 'owner',
+      }),
+    ).toThrow(/record why/i);
+    expect(database.work.getCard(card.id)?.reviewerCountOverride).toBeNull();
   });
 
   it('REFUSES a parent card that belongs to a different project', () => {

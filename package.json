@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Local-first multi-company AI organization and development orchestration platform.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ConrayGambit/ai-labs-platform.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ConrayGambit/ai-labs-platform/issues"
+  },
+  "homepage": "https://github.com/ConrayGambit/ai-labs-platform#readme",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "npm run build:web && npm run build:server",
@@ -41,6 +50,6 @@
     "vitest": "4.1.10"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

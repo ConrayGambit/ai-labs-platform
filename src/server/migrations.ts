@@ -460,4 +460,26 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS card_artifacts_card ON card_artifacts(card_id, created_at);
       `,
   },
+  {
+    id: '0009-gate-ladder',
+    // The ladder is policy data in source; what belongs in the database is which
+    // ladder a project uses and where scrutiny has been deliberately raised.
+    //
+    // Both override columns are nullable, and null means "use the ladder's
+    // default". That keeps one reviewer as the default without writing a 1 into
+    // every project and card row, where it would later be indistinguishable
+    // from a deliberate setting.
+    //
+    // A raise records who made it and why: "this one needs a second pair of
+    // eyes" is a judgement worth being able to look back on (spec 20.2.1).
+    sql: `
+        ALTER TABLE platform_projects ADD COLUMN gate_ladder_id TEXT NOT NULL DEFAULT 'product';
+        ALTER TABLE platform_projects ADD COLUMN reviewer_count_override INTEGER;
+        ALTER TABLE cards ADD COLUMN gate_id TEXT
+          CHECK(gate_id IS NULL OR gate_id IN ('G1','G2','G3','G4'));
+        ALTER TABLE cards ADD COLUMN reviewer_count_override INTEGER;
+        ALTER TABLE cards ADD COLUMN reviewer_raise_reason TEXT;
+        ALTER TABLE cards ADD COLUMN reviewer_raised_by_user_id TEXT REFERENCES users(id);
+      `,
+  },
 ];

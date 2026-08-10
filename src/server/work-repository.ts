@@ -7,8 +7,10 @@ import {
   type CardActivity,
   type CardActivityInput,
   type CardArtifact,
+  type BoardColumnKey,
   type CardStatus,
   type CreateCardInput,
+  type GateId,
   type UpdateCardInput,
 } from '../shared/work.js';
 import { OWNER_USER_ID } from '../shared/identity.js';
@@ -23,6 +25,10 @@ interface CardRow {
   priority: Card['priority'];
   assignee_org_agent_id: string | null;
   owner_notes: string;
+  gate_id: Card['gateId'];
+  reviewer_count_override: number | null;
+  reviewer_raise_reason: string | null;
+  reviewer_raised_by_user_id: string | null;
   position: number;
   created_at: string;
   updated_at: string;
@@ -58,6 +64,10 @@ const mapCard = (row: CardRow): Card => ({
   priority: row.priority,
   assigneeOrgAgentId: row.assignee_org_agent_id,
   ownerNotes: row.owner_notes,
+  gateId: row.gate_id,
+  reviewerCountOverride: row.reviewer_count_override,
+  reviewerRaiseReason: row.reviewer_raise_reason,
+  reviewerRaisedByUserId: row.reviewer_raised_by_user_id,
   position: row.position,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -85,8 +95,20 @@ const mapArtifact = (row: ArtifactRow): CardArtifact => ({
 
 export interface MoveCardInput {
   cardId: string;
-  status: CardStatus;
+  /**
+   * A board column, not a status. Gate columns are not card statuses — moving
+   * to `G2` puts the card in review at G2, and the repository does that
+   * translation once so no caller has to remember it.
+   */
+  to: BoardColumnKey;
   position: number;
+  userId: string;
+}
+
+export interface RaiseReviewerCountInput {
+  cardId: string;
+  count: number;
+  reason: string;
   userId: string;
 }
 
@@ -108,6 +130,12 @@ export interface WorkRepository {
    */
   setOwnerNotes(input: SetOwnerNotesInput): Card;
   moveCard(input: MoveCardInput): Card;
+  /**
+   * Raises the reviewer count for one card, recording who raised it and why.
+   * Lowering is not this method's business: the gate policy rejects an override
+   * below the ladder default, so there is no way in here to weaken a gate.
+   */
+  raiseReviewerCount(input: RaiseReviewerCountInput): Card;
   appendActivity(input: CardActivityInput): CardActivity;
   listActivity(cardId: string): CardActivity[];
   attachArtifact(input: AttachArtifactInput): CardArtifact;
@@ -283,6 +311,11 @@ export function createWorkRepository(connection: Database.Database): WorkReposit
     moveCard(input) {
       return connection.transaction(() => {
         const source = requireCardRow(input.cardId);
+        // A gate column is not a status. Translate here, once, so no caller has
+        // to remember that G2 means "in review, at G2".
+        const isGate = /^G[1-4]$/.test(input.to);
+        const status: CardStatus = isGate ? 'review' : (input.to as CardStatus);
+        const gateId: GateId | null = isGate ? (input.to as GateId) : null;
         // Close the gap the card leaves behind, open one where it lands, then
         // write it. Doing this in any other order leaves two cards sharing a
         // position, and the board renders them in an arbitrary order.
@@ -295,17 +328,39 @@ export function createWorkRepository(connection: Database.Database): WorkReposit
           .prepare(
             'UPDATE cards SET position = position + 1 WHERE project_id = ? AND status = ? AND position >= ? AND id <> ?',
           )
-          .run(source.project_id, input.status, input.position, input.cardId);
+          .run(source.project_id, status, input.position, input.cardId);
         connection
-          .prepare('UPDATE cards SET status = ?, position = ?, updated_at = ? WHERE id = ?')
-          .run(input.status, input.position, new Date().toISOString(), input.cardId);
+          .prepare(
+            'UPDATE cards SET status = ?, gate_id = ?, position = ?, updated_at = ? WHERE id = ?',
+          )
+          .run(status, gateId, input.position, new Date().toISOString(), input.cardId);
         recordActivity({
           cardId: input.cardId,
           actorType: 'user',
           actorId: input.userId,
           kind: 'moved',
-          detail: `${source.status} -> ${input.status}`,
+          detail: `${source.gate_id ?? source.status} -> ${input.to}`,
         });
+        return mapCard(requireCardRow(input.cardId));
+      })();
+    },
+
+    raiseReviewerCount(input) {
+      return connection.transaction(() => {
+        requireCardRow(input.cardId);
+        if (!input.reason.trim()) {
+          // The reason is the point. A raise with no reason cannot be looked
+          // back on, which is the whole justification for recording it.
+          throw new Error('A reviewer raise must record why');
+        }
+        connection.prepare(`
+          UPDATE cards SET
+            reviewer_count_override = @count,
+            reviewer_raise_reason = @reason,
+            reviewer_raised_by_user_id = @userId,
+            updated_at = @updatedAt
+          WHERE id = @cardId
+        `).run({ ...input, updatedAt: new Date().toISOString() });
         return mapCard(requireCardRow(input.cardId));
       })();
     },

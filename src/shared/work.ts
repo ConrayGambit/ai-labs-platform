@@ -18,6 +18,12 @@ export interface Card {
   assigneeOrgAgentId: string | null;
   /** The owner's notes. Agents read these; agents never write them. */
   ownerNotes: string;
+  /** Which gate the card sits at. Meaningful only while `status` is 'review'. */
+  gateId: GateId | null;
+  /** A deliberate raise in scrutiny for this card, or null for the default. */
+  reviewerCountOverride: number | null;
+  reviewerRaiseReason: string | null;
+  reviewerRaisedByUserId: string | null;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -96,6 +102,76 @@ export interface AttachArtifactInput {
 /** Output-first: a card may not reach done without an inspectable artifact. */
 export function canCloseCard(artifactCount: number): boolean {
   return artifactCount > 0;
+}
+
+export type GateId = 'G1' | 'G2' | 'G3' | 'G4';
+
+export interface Gate {
+  id: GateId;
+  label: string;
+  /**
+   * Reviews required before a card may leave this gate, by default. One
+   * everywhere; a project or a card may raise it, never lower it (spec 20.2.1).
+   */
+  reviewerCount: number;
+  /**
+   * When true, no reviewer may read another's review before filing. Enforced in
+   * S2, and only meaningful once the effective count is two or more — at one
+   * reviewer there is nobody to be blind from.
+   */
+  independentReview: boolean;
+  /** When true, the owner must personally record a decision. */
+  ownerSignature: boolean;
+}
+
+export interface GateLadder {
+  id: string;
+  label: string;
+  gates: Gate[];
+}
+
+/**
+ * A board column key: one of the fixed lifecycle columns, or a gate.
+ *
+ * Gate columns are not card statuses. A card at a gate has `status = 'review'`
+ * and carries the gate it sits at, which keeps the lifecycle a closed set while
+ * letting each ladder show a different board.
+ */
+export type BoardColumnKey = Exclude<CardStatus, 'review'> | GateId;
+
+export interface BoardColumn {
+  key: BoardColumnKey;
+  label: string;
+  gateId: GateId | null;
+}
+
+export interface AdvanceEvidence {
+  reviewsFiled: number;
+  ownerDecision: boolean;
+  artifactCount: number;
+}
+
+/**
+ * Most specific wins: the card, then the project, then the ladder's default.
+ *
+ * A value below the ladder's default is rejected rather than silently clamped.
+ * Clamping would let a weakening override look accepted, and the whole point of
+ * recording a raise is that somebody decided this work earned more scrutiny.
+ */
+export function effectiveReviewerCount(
+  gate: Gate,
+  overrides: { project?: number | null; card?: number | null },
+): number {
+  const chosen = overrides.card ?? overrides.project;
+  // A null override means "not set", which is not the same as zero reviewers.
+  if (chosen === undefined || chosen === null) return gate.reviewerCount;
+  if (chosen < gate.reviewerCount) {
+    throw new Error(
+      `Reviewer count may be raised but not lowered: gate ${gate.id} requires at least ` +
+        `${gate.reviewerCount}, got ${chosen}`,
+    );
+  }
+  return chosen;
 }
 
 /**
