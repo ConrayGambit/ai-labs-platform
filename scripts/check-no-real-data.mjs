@@ -28,6 +28,13 @@ const PERSONAL_HOME = /(?:[A-Za-z]:\\Users\\|\/home\/|\/Users\/)[A-Za-z0-9._-]+/
 const ABSOLUTE_DRIVE = /\b[A-Za-z]:\\[^\s"'`)\]]*/g;
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 
+// UTF-8 text read as Windows-1252 and re-encoded. Windows PowerShell's
+// Get-Content defaults to the ANSI codepage for files without a BOM, so any
+// line-splice round trip silently mangles every non-ASCII character. It corrupted
+// seeded agent instructions once and no test noticed, because tests assert ids
+// and models rather than prose.
+const MOJIBAKE = /â€[-”“™]|→|Â[§·°±»«]/g;
+
 /**
  * @param {string} file
  * @param {string} content
@@ -46,6 +53,9 @@ export function findViolations(file, content, denylist) {
     return violations;
   }
 
+  for (const match of content.match(MOJIBAKE) ?? []) {
+    add('encoding-corruption', match);
+  }
   for (const match of content.match(PERSONAL_HOME) ?? []) {
     add('personal-home-path', match);
   }

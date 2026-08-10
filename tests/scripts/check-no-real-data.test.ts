@@ -38,6 +38,18 @@ describe('no-real-data guard', () => {
     expect(violations[0].rule).toBe('denylist-term');
   });
 
+  it('flags UTF-8 text mangled by an ANSI round trip', () => {
+    // What a PowerShell Get-Content/Set-Content splice does to an em dash.
+    const mangled = 'design language inferred from the brief — no boilerplate';
+    const violations = findViolations('src/server/database.ts', mangled, []);
+    expect(violations[0].rule).toBe('encoding-corruption');
+  });
+
+  it('allows the correctly encoded character', () => {
+    const clean = 'design language inferred from the brief — no boilerplate';
+    expect(findViolations('src/server/database.ts', clean, [])).toEqual([]);
+  });
+
   it('passes clean content', () => {
     expect(findViolations('src/a.ts', 'export const value = 1;', ['acmecorp'])).toEqual([]);
   });

@@ -211,6 +211,7 @@ export function buildApp({
 
   registerPlatformApi(app, database.platform, {
     currentUserId,
+    identity: database.identity,
     exportEvent,
     logExportFailure,
     exportDrainTimeoutMs,

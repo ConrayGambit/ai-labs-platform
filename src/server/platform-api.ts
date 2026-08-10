@@ -1,7 +1,8 @@
-import type { FastifyInstance } from 'fastify';
+﻿import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PlatformEvent } from '../shared/platform.js';
 import { createPlatformExportWorker } from './platform-export-worker.js';
+import type { IdentityRepository } from './identity-repository.js';
 import type { PlatformRepository } from './platform-repository.js';
 import {
   createPortfolioSchema,
@@ -19,6 +20,11 @@ export type ExportFailureLogger = (failure: {
 
 interface PlatformApiOptions {
   currentUserId: string;
+  /**
+   * Access is decided here, not by comparing strings. Without it the users table
+   * and its venture grants are inert and §19's venture-scoped access is unenforced.
+   */
+  identity: IdentityRepository;
   exportEvent?: ExportEvent;
   logExportFailure?: ExportFailureLogger;
   exportDrainTimeoutMs?: number;
@@ -30,15 +36,36 @@ function requireVenture(repository: PlatformRepository, ventureId: string) {
   return venture;
 }
 
+/**
+ * A portfolio is the owner's own operating environment, so reaching it requires
+ * being the owner — checked against the users table, so a disabled or unknown
+ * actor is refused even if the stored owner string happens to match.
+ */
 function requireOwnedPortfolio(
   repository: PlatformRepository,
+  identity: IdentityRepository,
   portfolioId: string,
   currentUserId: string,
 ) {
   const portfolio = repository.getPortfolio(portfolioId);
   if (!portfolio) throw new Error(`Portfolio not found: ${portfolioId}`);
-  if (portfolio.ownerUserId !== currentUserId) throw new Error('Trusted user does not own this portfolio');
+  identity.assertRole(currentUserId, ['owner']);
+  if (portfolio.ownerUserId !== currentUserId) {
+    throw new Error('Trusted user does not own this portfolio');
+  }
   return portfolio;
+}
+
+/** Venture reach: the owner sees every venture, everyone else only granted ones. */
+function requireVentureAccess(
+  repository: PlatformRepository,
+  identity: IdentityRepository,
+  ventureId: string,
+  currentUserId: string,
+) {
+  const venture = requireVenture(repository, ventureId);
+  identity.assertVentureAccess(currentUserId, venture.id);
+  return venture;
 }
 
 export function registerPlatformApi(
@@ -74,7 +101,7 @@ export function registerPlatformApi(
   app.get<{ Params: { portfolioId: string } }>(
     '/api/platform/portfolios/:portfolioId/ventures',
     async (request) => {
-      requireOwnedPortfolio(repository, request.params.portfolioId, options.currentUserId);
+      requireOwnedPortfolio(repository, options.identity, request.params.portfolioId, options.currentUserId);
       return { ventures: repository.listVentures(request.params.portfolioId) };
     },
   );
@@ -91,8 +118,7 @@ export function registerPlatformApi(
   app.get<{ Params: { ventureId: string } }>(
     '/api/platform/ventures/:ventureId/projects',
     async (request) => {
-      const venture = requireVenture(repository, request.params.ventureId);
-      requireOwnedPortfolio(repository, venture.portfolioId, options.currentUserId);
+      requireVentureAccess(repository, options.identity, request.params.ventureId, options.currentUserId);
       return { projects: repository.listProjects(request.params.ventureId) };
     },
   );
@@ -117,7 +143,7 @@ export function registerPlatformApi(
   app.get<{ Params: { portfolioId: string } }>(
     '/api/platform/portfolios/:portfolioId/export-status',
     async (request) => {
-      requireOwnedPortfolio(repository, request.params.portfolioId, options.currentUserId);
+      requireOwnedPortfolio(repository, options.identity, request.params.portfolioId, options.currentUserId);
       return repository.getExportStatus(request.params.portfolioId);
     },
   );
@@ -125,7 +151,7 @@ export function registerPlatformApi(
   app.get<{ Params: { portfolioId: string }; Querystring: { limit?: string } }>(
     '/api/platform/portfolios/:portfolioId/events',
     async (request) => {
-      requireOwnedPortfolio(repository, request.params.portfolioId, options.currentUserId);
+      requireOwnedPortfolio(repository, options.identity, request.params.portfolioId, options.currentUserId);
       return { events: repository.listEvents(
         request.params.portfolioId,
         z.coerce.number().int().min(1).max(200).default(30).parse(request.query.limit),

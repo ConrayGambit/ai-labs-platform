@@ -417,4 +417,25 @@ export const MIGRATIONS: Migration[] = [
         );
       `,
   },
+  {
+    id: '0005-owner-user',
+    // The platform layer identified its owner by an opaque string while the users
+    // table held generated ids, so the two identity concepts could never match and
+    // "who approved this" named nothing. Seeding the owner with the well-known id
+    // the platform layer already uses reconciles them without touching any row.
+    //
+    // A database-level foreign key from platform_portfolios.owner_user_id is
+    // deliberately NOT added here: SQLite cannot add a constraint to an existing
+    // table, the rebuild would have to drop a table that platform_ventures and
+    // platform_approvals reference, and the required PRAGMA foreign_keys=off
+    // cannot run inside the transaction each migration is wrapped in. Ownership
+    // is enforced in the repository layer instead, which is the only writer.
+    sql: `
+        INSERT OR IGNORE INTO users (id, display_name, role, enabled, created_at, updated_at)
+        SELECT 'owner', 'Owner', 'owner', 1,
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'owner');
+      `,
+  },
 ];

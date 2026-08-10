@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
+import { OWNER_USER_ID } from '../../src/shared/identity.js';
 
 describe('identity and venture-scoped access', () => {
   let database: OrchestratorDatabase | undefined;
@@ -10,18 +11,26 @@ describe('identity and venture-scoped access', () => {
 
   const open = (): OrchestratorDatabase => (database = createDatabase(':memory:'));
 
-  it('creates users with distinct roles', () => {
+  it('seeds exactly one owner, with the well-known id', () => {
     const db = open();
-    const owner = db.identity.createUser({ displayName: 'Owner', role: 'owner' });
+    const owner = db.identity.getOwner();
+    expect(owner).not.toBeNull();
+    expect(owner?.id).toBe(OWNER_USER_ID);
+    expect(owner?.role).toBe('owner');
+    expect(owner?.enabled).toBe(true);
+  });
+
+  it('creates additional users with generated ids and distinct roles', () => {
+    const db = open();
     const staff = db.identity.createUser({ displayName: 'Staff', role: 'staff' });
-    expect(owner.role).toBe('owner');
+    const observer = db.identity.createUser({ displayName: 'Observer', role: 'observer' });
     expect(staff.role).toBe('staff');
-    expect(db.identity.getOwner()?.id).toBe(owner.id);
+    expect(observer.role).toBe('observer');
+    expect(staff.id).not.toBe(OWNER_USER_ID);
   });
 
   it('refuses a second owner', () => {
     const db = open();
-    db.identity.createUser({ displayName: 'Owner', role: 'owner' });
     expect(() => db.identity.createUser({ displayName: 'Other', role: 'owner' })).toThrow(
       /owner already exists/i,
     );
@@ -29,8 +38,7 @@ describe('identity and venture-scoped access', () => {
 
   it('grants the owner access to every venture without an explicit grant', () => {
     const db = open();
-    const owner = db.identity.createUser({ displayName: 'Owner', role: 'owner' });
-    expect(() => db.identity.assertVentureAccess(owner.id, 'venture-anything')).not.toThrow();
+    expect(() => db.identity.assertVentureAccess(OWNER_USER_ID, 'venture-anything')).not.toThrow();
   });
 
   it('DENIES a staff user access to a venture they were not granted', () => {

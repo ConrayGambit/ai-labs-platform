@@ -217,9 +217,10 @@ describe('seeded executive graph', () => {
 
   it('can place the owner at the root of the reporting graph', () => {
     const db = open();
-    const owner = db.identity.createUser({ displayName: 'Owner', role: 'owner' });
-    db.org.setReportsToUser('exec-ceo', owner.id);
-    expect(db.getOrgAgent('exec-ceo')?.reportsToUserId).toBe(owner.id);
+    const owner = db.identity.getOwner();
+    expect(owner).not.toBeNull();
+    db.org.setReportsToUser('exec-ceo', owner!.id);
+    expect(db.getOrgAgent('exec-ceo')?.reportsToUserId).toBe(owner!.id);
   });
 
   it('rejects placing an agent under an unknown user', () => {
