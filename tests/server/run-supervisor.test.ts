@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 import { createRunSupervisor, type RunSupervisor } from '../../src/server/run-supervisor.js';
 import { buildPrompt, OWNER_NOTES_HEADING } from '../../src/server/run-prompt.js';
@@ -7,13 +7,6 @@ import type { SessionUpdate } from '../../src/shared/acp.js';
 import type { Card } from '../../src/shared/work.js';
 import type { OrgAgent } from '../../src/shared/domain.js';
 
-/**
- * These tests spawn a real subprocess per run. Under the full suite's
- * parallelism, process spawn alone can exceed the 5s default on a loaded
- * machine, which showed up as two suites timing out together while both passed
- * in isolation. The work is not slow; starting a process under contention is.
- */
-vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const FAKE_AGENT = resolve('tests/fixtures/fake-acp-agent.mjs');
 

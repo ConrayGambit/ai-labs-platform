@@ -621,4 +621,44 @@ export const MIGRATIONS: Migration[] = [
           ON review_assignments(card_id, gate_id, role);
       `,
   },
+  {
+    id: '0014-reviews',
+    // A review is filed once and never edited. A correction is a new review
+    // marking the original superseded (spec 20.5): the record of what was
+    // believed at the time is itself evidence, and an edit destroys it.
+    //
+    // Findings hang off the review rather than off the card, so a finding
+    // always travels with the review that made it and the reviewer who signed
+    // it. A finding with no author is an anonymous accusation.
+    sql: `
+        CREATE TABLE IF NOT EXISTS reviews (
+          id TEXT PRIMARY KEY,
+          card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          gate_id TEXT NOT NULL CHECK(gate_id IN ('G1','G2','G3','G4')),
+          reviewer_org_agent_id TEXT NOT NULL REFERENCES org_agents(id),
+          verdict TEXT NOT NULL
+            CHECK(verdict IN ('approve','approve_with_findings','reject')),
+          checklist_json TEXT NOT NULL DEFAULT '[]',
+          what_to_preserve TEXT NOT NULL DEFAULT '',
+          questions_for_builder TEXT NOT NULL DEFAULT '',
+          superseded_by_review_id TEXT REFERENCES reviews(id),
+          filed_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS reviews_card ON reviews(card_id, gate_id, filed_at);
+
+        CREATE TABLE IF NOT EXISTS review_findings (
+          id TEXT PRIMARY KEY,
+          review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+          priority TEXT NOT NULL CHECK(priority IN ('P0','P1','P2','P3','P4')),
+          area TEXT NOT NULL,
+          finding TEXT NOT NULL,
+          predicted_failure TEXT NOT NULL DEFAULT '',
+          evidence TEXT NOT NULL DEFAULT '',
+          proposed_fix TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS review_findings_review
+          ON review_findings(review_id, priority);
+      `,
+  },
 ];

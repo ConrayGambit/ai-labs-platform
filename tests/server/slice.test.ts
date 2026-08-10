@@ -1,12 +1,10 @@
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 import { canAdvance, PRODUCT_LADDER, columnKeyFor, deriveColumns } from '../../src/server/gate-policy.js';
 import { createRunSupervisor, type RunSupervisor } from '../../src/server/run-supervisor.js';
 import type { SessionUpdate } from '../../src/shared/acp.js';
 
-/** Spawns a real subprocess; slower than the 5s default under full parallelism. */
-vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const FAKE_AGENT = resolve('tests/fixtures/fake-acp-agent.mjs');
 

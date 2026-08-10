@@ -26,6 +26,72 @@ export interface AssignRoleInput {
   orgAgentId: string;
 }
 
+export type FindingPriority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
+
+export interface Finding {
+  id: string;
+  reviewId: string;
+  priority: FindingPriority;
+  /** What part of the system this is about. */
+  area: string;
+  finding: string;
+  /**
+   * Concrete inputs or state leading to a wrong result. Not a worry — a case.
+   * A finding that cannot name how it fails is an opinion.
+   */
+  predictedFailure: string;
+  /** `file:line`, so a reader can go and look rather than take it on trust. */
+  evidence: string;
+  proposedFix: string;
+  createdAt: string;
+}
+
+export interface FindingInput {
+  priority: FindingPriority;
+  area: string;
+  finding: string;
+  predictedFailure: string;
+  evidence: string;
+  proposedFix: string;
+}
+
+export type ReviewVerdict = 'approve' | 'approve_with_findings' | 'reject';
+
+export interface ChecklistAnswer {
+  item: string;
+  answer: string;
+}
+
+export interface Review {
+  id: string;
+  cardId: string;
+  gateId: GateId;
+  reviewerOrgAgentId: string;
+  verdict: ReviewVerdict;
+  /**
+   * Every reviewer answers the full checklist for the gate. "Not applicable" is
+   * an acceptable answer; silence is not (spec 20.3).
+   */
+  checklist: ChecklistAnswer[];
+  whatToPreserve: string;
+  questionsForBuilder: string;
+  findings: Finding[];
+  /** Set when a later review corrects this one. A review is never edited. */
+  supersededByReviewId: string | null;
+  filedAt: string;
+}
+
+export interface FileReviewInput {
+  cardId: string;
+  gateId: GateId;
+  reviewerOrgAgentId: string;
+  verdict: ReviewVerdict;
+  checklist: ChecklistAnswer[];
+  whatToPreserve: string;
+  questionsForBuilder: string;
+  findings: FindingInput[];
+}
+
 /** The parts of an agent that decide whether it may review another's work. */
 export interface ReviewerIdentity {
   id: string;

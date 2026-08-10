@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import WebSocket from 'ws';
@@ -8,11 +8,6 @@ import { registerRealtime } from '../../src/server/realtime.js';
 import { createRunSupervisor, type RunSupervisor } from '../../src/server/run-supervisor.js';
 import { CORE_CAPABILITIES, negotiate, type ServerMessage } from '../../src/shared/wire.js';
 
-/**
- * These tests spawn a real subprocess per run, and open real sockets. Under the
- * full suite's parallelism that is slower than the 5s default allows.
- */
-vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const FAKE_AGENT = resolve('tests/fixtures/fake-acp-agent.mjs');
 
