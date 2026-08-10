@@ -2,6 +2,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   denylistCandidates,
+  denylistVerdict,
   findViolations,
   requiresDenylist,
 } from '../../scripts/check-no-real-data.mjs';
@@ -137,5 +138,40 @@ describe('denylist requirement', () => {
     expect(requiresDenylist([], { AI_LABS_REQUIRE_DENYLIST: '0' })).toBe(false);
     expect(requiresDenylist([], { AI_LABS_REQUIRE_DENYLIST: 'false' })).toBe(false);
     expect(requiresDenylist([], { AI_LABS_REQUIRE_DENYLIST: '' })).toBe(false);
+  });
+});
+
+describe('denylist verdict', () => {
+  const file = path.join('somewhere', '.denylist');
+
+  it('is active when the denylist supplied terms', () => {
+    expect(denylistVerdict(['acmecorp'], file, false)).toEqual({ state: 'active', fatal: false });
+  });
+
+  it('is missing when no denylist was found at all', () => {
+    expect(denylistVerdict([], null, false).state).toBe('missing');
+  });
+
+  it('is empty when a denylist was found but held no terms', () => {
+    // A truncated or comment-only file. It enforces exactly nothing, so it
+    // cannot be reported in the language of a rule that ran.
+    expect(denylistVerdict([], file, false).state).toBe('empty');
+  });
+
+  it('does not fail a run that never asked for a denylist', () => {
+    expect(denylistVerdict([], null, false).fatal).toBe(false);
+    expect(denylistVerdict([], file, false).fatal).toBe(false);
+  });
+
+  it('fails a required run whose denylist is empty, not only one with no file', () => {
+    // The flag has to guarantee that the rule runs. Were an empty file to
+    // satisfy it, it would guarantee the existence of a file and nothing more,
+    // which is the weaker of the two promises and the useless one.
+    expect(denylistVerdict([], file, true).fatal).toBe(true);
+    expect(denylistVerdict([], null, true).fatal).toBe(true);
+  });
+
+  it('never fails a required run that has terms to enforce', () => {
+    expect(denylistVerdict(['acmecorp'], file, true)).toEqual({ state: 'active', fatal: false });
   });
 });

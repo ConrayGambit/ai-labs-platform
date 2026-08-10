@@ -34,15 +34,20 @@ enforces its generic rules: personal home paths, arbitrary absolute paths, real 
 says so on stderr and names every location it looked in, because "no denylist configured" is not a
 result to read past: it means the one rule that catches real proper nouns did not run.
 
-If your deployment always has a denylist, say so, and a run that cannot find one fails instead of
-falling back to the weaker rule set:
+A denylist file that exists but holds no term — truncated, clobbered by a redirect, or nothing but
+comments — is treated exactly as a missing one, and says which file was empty. It enforces the same
+amount as no denylist at all, so reporting it as `0 private term(s)` and passing would describe an
+inert rule in the language of one that ran.
+
+If your deployment always has a denylist, say so, and a run that cannot find one — or finds one with
+nothing in it — fails instead of falling back to the weaker rule set:
 
 ```bash
 export AI_LABS_REQUIRE_DENYLIST=1
 ```
 
-Leave it unset in a clone that legitimately has no denylist — that is why it is opt-in rather than
-the default.
+That guarantees the rule **ran**, not merely that a file was present. Leave it unset in a clone that
+legitimately has no denylist — that is why it is opt-in rather than the default.
 
 ## Getting set up
 
