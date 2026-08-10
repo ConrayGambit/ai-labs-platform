@@ -6,6 +6,7 @@ import { TASK_STATUSES } from '../shared/domain.js';
 import { applyMigrations } from './migrations.js';
 import { createIdentityRepository, type IdentityRepository } from './identity-repository.js';
 import { createOrgRepository, type OrgRepository } from './org-repository.js';
+import { createPlatformRepository, type PlatformRepository } from './platform-repository.js';
 import { assertTenureOrdering, type Dedication, type ExpiryKind, type Tenure } from '../shared/org.js';
 import type {
   AgentKind,
@@ -761,6 +762,8 @@ export interface OrchestratorDatabase {
   identity: IdentityRepository;
   /** Departments, tenure, permanence and re-parenting. */
   org: OrgRepository;
+  /** Portfolio, venture, governed project, approval and event persistence. */
+  platform: PlatformRepository;
   close(): void;
 }
 
@@ -1532,6 +1535,7 @@ export function createDatabase(filename: string): OrchestratorDatabase {
     },
     identity: createIdentityRepository(connection),
     org: createOrgRepository(connection),
+    platform: createPlatformRepository(connection),
     close() {
       connection.close();
     },

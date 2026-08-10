@@ -88,8 +88,16 @@ function loadDenylist() {
   return { terms, path };
 }
 
+/**
+ * Tracked files PLUS untracked files that are not ignored. `git ls-files` alone
+ * lists only tracked files, so a newly written file stays invisible to the guard
+ * until it is staged — which means `npm run verify` would report a clean repo
+ * that the pre-commit hook then rejects.
+ */
 function trackedFiles() {
-  return execFileSync('git', ['ls-files'], { encoding: 'utf8' })
+  return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+    encoding: 'utf8',
+  })
     .split(/\r?\n/)
     .filter(Boolean)
     .filter((file) => !SKIP_FILES.has(file))

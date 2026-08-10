@@ -6,6 +6,7 @@ import { buildApp } from './app.js';
 import { runAgentProcess } from './agent-process.js';
 import type { AgentInvoker } from './council.js';
 import { createDatabase } from './database.js';
+import { createObsidianExporter } from './obsidian-exporter.js';
 import { resolveAiLabsPaths } from './paths.js';
 
 const host = process.env.ORCHESTRATOR_HOST ?? '127.0.0.1';
@@ -38,7 +39,21 @@ const invoke: AgentInvoker = async ({ runtime, prompt, projectPath, taskId, runI
   });
   return result.content;
 };
-const app = buildApp({ database, invoke });
+
+// The mirror is opt-in and has no default path: a hardcoded personal vault
+// location would be real data in a published repository. Without it configured,
+// events are still recorded durably and simply queue in the export outbox.
+const obsidianVaultPath = process.env.AI_LABS_OBSIDIAN_VAULT;
+const obsidianExporter = obsidianVaultPath
+  ? createObsidianExporter({ vaultPath: obsidianVaultPath })
+  : null;
+const currentUserId = process.env.AI_LABS_OWNER_USER_ID ?? 'owner';
+const app = buildApp({
+  database,
+  invoke,
+  currentUserId,
+  exportEvent: obsidianExporter ? (event) => obsidianExporter.exportEvent(event) : undefined,
+});
 const webRoot = resolve('./dist/web');
 
 if (existsSync(webRoot)) {

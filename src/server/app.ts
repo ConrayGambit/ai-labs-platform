@@ -6,11 +6,21 @@ import { RUNTIME_OPTION_KEYS, SKILL_CATEGORIES, TASK_STATUSES } from '../shared/
 import { createCouncilOrchestrator, type AgentInvoker } from './council.js';
 import type { OrchestratorDatabase } from './database.js';
 import { createHierarchyOrchestrator } from './hierarchy.js';
+import { registerPlatformApi, type ExportFailureLogger } from './platform-api.js';
 import { probeAgentRuntimes } from './runtime-health.js';
+import type { PlatformEvent } from '../shared/platform.js';
 
 export interface AppDependencies {
   database: OrchestratorDatabase;
   invoke: AgentInvoker;
+  /**
+   * The trusted actor, resolved server-side. No request body may supply it:
+   * that is what stops an approval actor being spoofed.
+   */
+  currentUserId?: string;
+  exportEvent?: (event: PlatformEvent) => Promise<unknown>;
+  logExportFailure?: ExportFailureLogger;
+  exportDrainTimeoutMs?: number;
 }
 
 const projectSchema = z.object({
@@ -120,7 +130,14 @@ function assertProjectDirectory(path: string): void {
   }
 }
 
-export function buildApp({ database, invoke }: AppDependencies): FastifyInstance {
+export function buildApp({
+  database,
+  invoke,
+  currentUserId = 'owner',
+  exportEvent,
+  logExportFailure,
+  exportDrainTimeoutMs,
+}: AppDependencies): FastifyInstance {
   const app = Fastify({ logger: false });
   const council = createCouncilOrchestrator({ database, invoke });
   const hierarchy = createHierarchyOrchestrator({ database, invoke });
@@ -132,19 +149,39 @@ export function buildApp({ database, invoke }: AppDependencies): FastifyInstance
     }
     const message = error instanceof Error ? error.message : 'Unknown server error';
     if (
+      message === 'Trusted approval actor does not own this portfolio' ||
+      message === 'Trusted user does not own this portfolio' ||
+      message === 'Trusted user does not own this idempotency key' ||
+      message.startsWith('Access denied:') ||
+      message.startsWith('Action not permitted for role')
+    ) {
+      void reply.code(403).send({ error: message });
+      return;
+    }
+    if (message === 'Idempotency key conflicts with another request') {
+      void reply.code(409).send({ error: message });
+      return;
+    }
+    if (
       message === 'Project path must be absolute' ||
-      message === 'Project path must be an existing directory'
+      message === 'Project path must be an existing directory' ||
+      message.startsWith('Free text appears to contain a credential')
     ) {
       void reply.code(400).send({ error: message });
       return;
     }
     if (
       message.startsWith('Project not found:') ||
+      message.startsWith('Portfolio not found:') ||
+      message.startsWith('Venture not found:') ||
+      message.startsWith('Approval not found:') ||
       message.startsWith('Task not found:') ||
       message.startsWith('Run not found:') ||
+      message.startsWith('User not found:') ||
       message.startsWith('Agent not found:') ||
       message.startsWith('Agent runtime not found:') ||
       message.startsWith('Organization not found:') ||
+      message.startsWith('Department not found:') ||
       message.startsWith('Skill not found:') ||
       message.startsWith('Organizational agent not found:')
     ) {
@@ -153,6 +190,13 @@ export function buildApp({ database, invoke }: AppDependencies): FastifyInstance
     }
     if (
       message.includes('cycle') ||
+      message.startsWith('Invalid project lifecycle transition:') ||
+      message.startsWith('Project plan can only be submitted from') ||
+      message.startsWith('Project is not pending approval:') ||
+      message.startsWith('Approval has already been decided') ||
+      message.startsWith('Temporary staff require an expiry condition') ||
+      message.startsWith('Only temporary staff carry an expiry condition') ||
+      message.startsWith('Permanent staff cannot be') ||
       message.startsWith('Manager cannot delegate:') ||
       message.startsWith('Hierarchy exceeds maximum depth') ||
       message.startsWith('Hierarchy runs support at most') ||
@@ -163,6 +207,13 @@ export function buildApp({ database, invoke }: AppDependencies): FastifyInstance
       return;
     }
     void reply.code(500).send({ error: message });
+  });
+
+  registerPlatformApi(app, database.platform, {
+    currentUserId,
+    exportEvent,
+    logExportFailure,
+    exportDrainTimeoutMs,
   });
 
   app.get('/api/health', async () => ({ status: 'ok' }));

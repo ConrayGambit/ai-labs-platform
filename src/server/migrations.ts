@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+﻿import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 export interface Migration {
@@ -329,6 +329,73 @@ export const MIGRATIONS: Migration[] = [
            SET manager_id = 'exec-chief-of-staff'
          WHERE id IN ('exec-cto', 'exec-cmo', 'exec-cdo')
            AND manager_id = 'exec-ceo';
+      `);
+    },
+  },
+  {
+    id: '0004-platform-foundation',
+    up: (connection) => {
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS platform_portfolios (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS platform_ventures (
+          id TEXT PRIMARY KEY,
+          portfolio_id TEXT NOT NULL REFERENCES platform_portfolios(id) ON DELETE CASCADE,
+          name TEXT NOT NULL, kind TEXT NOT NULL, mission TEXT NOT NULL,
+          status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS platform_projects (
+          id TEXT PRIMARY KEY,
+          venture_id TEXT NOT NULL REFERENCES platform_ventures(id) ON DELETE CASCADE,
+          name TEXT NOT NULL, objective TEXT NOT NULL,
+          success_criteria_json TEXT NOT NULL, constraints_json TEXT NOT NULL,
+          zero_first INTEGER NOT NULL, lifecycle TEXT NOT NULL,
+          supervision_policy TEXT NOT NULL, workspace_mode TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS platform_approvals (
+          id TEXT PRIMARY KEY,
+          portfolio_id TEXT NOT NULL REFERENCES platform_portfolios(id) ON DELETE CASCADE,
+          venture_id TEXT NOT NULL REFERENCES platform_ventures(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL REFERENCES platform_projects(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL,
+          requested_by_org_agent_id TEXT, decided_by_user_id TEXT, decision_note TEXT,
+          created_at TEXT NOT NULL, decided_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS platform_events (
+          id TEXT PRIMARY KEY,
+          portfolio_id TEXT NOT NULL REFERENCES platform_portfolios(id) ON DELETE CASCADE,
+          venture_id TEXT, project_id TEXT, type TEXT NOT NULL,
+          actor_type TEXT NOT NULL, actor_id TEXT, payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS platform_idempotency_keys (
+          operation TEXT NOT NULL, key TEXT NOT NULL, request_hash TEXT NOT NULL,
+          project_id TEXT NOT NULL REFERENCES platform_projects(id) ON DELETE CASCADE,
+          approval_id TEXT NOT NULL REFERENCES platform_approvals(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL, PRIMARY KEY (operation, key)
+        );
+        CREATE INDEX IF NOT EXISTS platform_events_portfolio_time
+          ON platform_events(portfolio_id, created_at);
+
+        -- The outbox row is written in the same transaction as its event, so an
+        -- event can never exist unmirrored.
+        CREATE TABLE IF NOT EXISTS platform_export_outbox (
+          event_id TEXT PRIMARY KEY REFERENCES platform_events(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+          available_at TEXT NOT NULL, last_error_code TEXT, completed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS platform_export_outbox_ready
+          ON platform_export_outbox(status, available_at);
+        INSERT OR IGNORE INTO platform_export_outbox (event_id, status, attempts, available_at)
+          SELECT id, 'pending', 0, created_at FROM platform_events;
+
+        CREATE TABLE IF NOT EXISTS platform_owner_defaults (
+          owner_user_id TEXT PRIMARY KEY,
+          portfolio_id TEXT NOT NULL UNIQUE REFERENCES platform_portfolios(id) ON DELETE CASCADE
+        );
       `);
     },
   },
