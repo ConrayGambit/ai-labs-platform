@@ -49,6 +49,8 @@ export interface WorkProject {
    * to one and its work happen in the other.
    */
   repositoryPath: string | null;
+  /** Which gate ladder this project's board is built from. */
+  gateLadderId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,6 +108,7 @@ export interface CreateWorkProjectInput {
   successCriteria: string[];
   constraints?: string[];
   repositoryPath?: string | null;
+  gateLadderId?: string;
 }
 
 export interface ExecutiveSnapshot {

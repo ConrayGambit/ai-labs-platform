@@ -531,4 +531,47 @@ export const MIGRATIONS: Migration[] = [
         );
       `,
   },
+  {
+    id: '0011-runs',
+    // A run is a turn of an agent against a card, and it belongs to the core
+    // rather than to whichever window happened to start it.
+    //
+    // Every update is stored with a monotonic per-run sequence BEFORE being
+    // fanned out, so a client that connects late or reconnects replays exactly
+    // what happened, in the order it happened.
+    //
+    // `parent_run_id` is the session-lineage column. S1 records it; compaction
+    // behaviour arrives later, and a lineage not recorded from the start cannot
+    // be reconstructed afterwards.
+    sql: `
+        CREATE TABLE IF NOT EXISTS agent_runs (
+          id TEXT PRIMARY KEY,
+          card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          org_agent_id TEXT NOT NULL REFERENCES org_agents(id),
+          room_id TEXT REFERENCES rooms(id) ON DELETE SET NULL,
+          acp_session_id TEXT,
+          parent_run_id TEXT REFERENCES agent_runs(id),
+          status TEXT NOT NULL DEFAULT 'running'
+            CHECK(status IN ('running','completed','failed','cancelled','stopped')),
+          stop_reason TEXT,
+          stopped_reason TEXT,
+          input_tokens INTEGER NOT NULL DEFAULT 0,
+          output_tokens INTEGER NOT NULL DEFAULT 0,
+          cost_ceiling_tokens INTEGER,
+          started_at TEXT NOT NULL,
+          finished_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS agent_runs_card ON agent_runs(card_id, started_at);
+        CREATE INDEX IF NOT EXISTS agent_runs_status ON agent_runs(status);
+
+        CREATE TABLE IF NOT EXISTS agent_run_updates (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+          sequence INTEGER NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE (run_id, sequence)
+        );
+      `,
+  },
 ];

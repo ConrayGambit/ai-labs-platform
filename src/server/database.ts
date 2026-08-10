@@ -8,6 +8,7 @@ import { createIdentityRepository, type IdentityRepository } from './identity-re
 import { createOrgRepository, type OrgRepository } from './org-repository.js';
 import { createPlatformRepository, type PlatformRepository } from './platform-repository.js';
 import { createRoomRepository, type RoomRepository } from './room-repository.js';
+import { createRunRepository, type RunRepository } from './run-repository.js';
 import { createWorkRepository, type WorkRepository } from './work-repository.js';
 import { assertTenureOrdering, type Dedication, type ExpiryKind, type Tenure } from '../shared/org.js';
 import type {
@@ -770,6 +771,8 @@ export interface OrchestratorDatabase {
   work: WorkRepository;
   /** Per-card rooms: membership, one-level threads and a shared canvas. */
   rooms: RoomRepository;
+  /** Agent runs and their replayable update transcripts. */
+  runs: RunRepository;
   close(): void;
 }
 
@@ -1544,6 +1547,7 @@ export function createDatabase(filename: string): OrchestratorDatabase {
     platform: createPlatformRepository(connection),
     work: createWorkRepository(connection),
     rooms: createRoomRepository(connection),
+    runs: createRunRepository(connection),
     close() {
       connection.close();
     },

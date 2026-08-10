@@ -23,7 +23,13 @@ interface AgentExecution {
   content: string;
 }
 
-function roleContext(agent: OrgAgent, skills: Skill[]): string {
+/**
+ * The agent's stable identity and doctrine, plus the guidance it has been
+ * assigned. Exported because the run supervisor builds the same stable tier;
+ * two renderings of an agent's identity would drift, and the one that drifted
+ * would be the one nobody was reading.
+ */
+export function roleContext(agent: OrgAgent, skills: Skill[]): string {
   const lines = [
     `[ORG_AGENT:${agent.id}]`,
     `Name: ${agent.name}`,
