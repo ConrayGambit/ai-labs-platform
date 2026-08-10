@@ -776,6 +776,12 @@ export interface OrchestratorDatabase {
   runs: RunRepository;
   /** Roles, reviews, findings, rulings and the override register. */
   governance: GovernanceRepository;
+  /**
+   * The underlying connection, for services that must span repositories inside
+   * one transaction. Repositories remain the way to reach data; this exists so
+   * a governance action that stops a card cannot half-happen.
+   */
+  connection: Database.Database;
   close(): void;
 }
 
@@ -1552,6 +1558,7 @@ export function createDatabase(filename: string): OrchestratorDatabase {
     rooms: createRoomRepository(connection),
     runs: createRunRepository(connection),
     governance: createGovernanceRepository(connection),
+    connection,
     close() {
       connection.close();
     },

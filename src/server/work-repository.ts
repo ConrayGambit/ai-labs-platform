@@ -8,6 +8,7 @@ import {
   type CardActivityInput,
   type CardArtifact,
   type BoardColumnKey,
+  type ActivityActorType,
   type CardStatus,
   type CreateCardInput,
   type GateId,
@@ -103,6 +104,12 @@ export interface MoveCardInput {
   to: BoardColumnKey;
   position: number;
   userId: string;
+  /**
+   * Who the board should say moved it. Defaults to a person; an escalation or
+   * an automation rule passes 'system', because recording the platform's own
+   * action as a user's is a small lie that an audit trail cannot afford.
+   */
+  actorType?: ActivityActorType;
 }
 
 export interface RaiseReviewerCountInput {
@@ -336,7 +343,7 @@ export function createWorkRepository(connection: Database.Database): WorkReposit
           .run(status, gateId, input.position, new Date().toISOString(), input.cardId);
         recordActivity({
           cardId: input.cardId,
-          actorType: 'user',
+          actorType: input.actorType ?? 'user',
           actorId: input.userId,
           kind: 'moved',
           detail: `${source.gate_id ?? source.status} -> ${input.to}`,

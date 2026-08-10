@@ -79,6 +79,12 @@ export interface GovernanceRepository {
     gateId: GateId,
     viewer: { id: string; role: ReviewViewerRole },
   ): Review[];
+  /**
+   * The effective reviewer count for a gate: card override, then project
+   * override, then the ladder default (spec 20.2.1). Exposed so the visibility
+   * rule, the adjudication gate and the advancement rule all read one answer.
+   */
+  requiredReviewers(cardId: string, gateId: GateId): number;
   /** Sets when an outstanding reviewer stops being able to seal the gate. */
   setReviewDeadline(input: {
     cardId: string; gateId: GateId; orgAgentId: string; deadlineAt: string | null;
@@ -451,5 +457,6 @@ export function createGovernanceRepository(connection: Database.Database): Gover
     },
 
     listCurrentReviews,
+    requiredReviewers: requiredReviewersFor,
   };
 }

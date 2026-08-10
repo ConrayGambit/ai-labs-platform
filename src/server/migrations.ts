@@ -671,4 +671,55 @@ export const MIGRATIONS: Migration[] = [
         ALTER TABLE review_assignments ADD COLUMN review_deadline_at TEXT;
       `,
   },
+  {
+    id: '0016-adjudication',
+    // A ruling is a decision on a finding; an escalation is a P0 the builder is
+    // not permitted to decide. Both are records rather than state flags,
+    // because the question these tables answer is "who decided what, and why".
+    //
+    // Rulings accumulate: a re-ruling after a contest is a new row, never an
+    // edit, so how a decision was reached survives alongside what was decided.
+    //
+    // The UNIQUE on finding_contests is rule 20.4.7 as a constraint: a reviewer
+    // may contest once.
+    sql: `
+        CREATE TABLE IF NOT EXISTS finding_rulings (
+          id TEXT PRIMARY KEY,
+          finding_id TEXT NOT NULL REFERENCES review_findings(id) ON DELETE CASCADE,
+          ruled_by_org_agent_id TEXT REFERENCES org_agents(id),
+          ruled_by_user_id TEXT REFERENCES users(id),
+          outcome TEXT NOT NULL CHECK(outcome IN ('adopted','deferred','overridden')),
+          reason TEXT NOT NULL,
+          next_step TEXT,
+          residual_risk TEXT,
+          is_final INTEGER NOT NULL DEFAULT 0,
+          ruled_at TEXT NOT NULL,
+          sequence INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS finding_rulings_finding
+          ON finding_rulings(finding_id, sequence);
+
+        CREATE TABLE IF NOT EXISTS finding_contests (
+          id TEXT PRIMARY KEY,
+          finding_id TEXT NOT NULL REFERENCES review_findings(id) ON DELETE CASCADE,
+          contested_by_org_agent_id TEXT NOT NULL REFERENCES org_agents(id),
+          new_evidence TEXT NOT NULL,
+          contested_at TEXT NOT NULL,
+          UNIQUE (finding_id, contested_by_org_agent_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS p0_escalations (
+          id TEXT PRIMARY KEY,
+          finding_id TEXT NOT NULL UNIQUE REFERENCES review_findings(id) ON DELETE CASCADE,
+          card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved')),
+          resolution TEXT,
+          resolved_by_user_id TEXT REFERENCES users(id),
+          raised_at TEXT NOT NULL,
+          resolved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS p0_escalations_open
+          ON p0_escalations(status, raised_at);
+      `,
+  },
 ];

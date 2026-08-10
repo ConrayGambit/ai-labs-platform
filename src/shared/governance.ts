@@ -134,6 +134,42 @@ export interface FileReviewInput {
   findings: FindingInput[];
 }
 
+export type RulingOutcome = 'adopted' | 'deferred' | 'overridden';
+
+export interface Ruling {
+  id: string;
+  findingId: string;
+  ruledByOrgAgentId: string | null;
+  ruledByUserId: string | null;
+  outcome: RulingOutcome;
+  reason: string;
+  /** Required on a deferral: a deferral with no next step is a finding dropped. */
+  nextStep: string | null;
+  residualRisk: string | null;
+  /** True once this ruling followed a contest. There is no third round. */
+  isFinal: boolean;
+  ruledAt: string;
+}
+
+export interface Contest {
+  id: string;
+  findingId: string;
+  contestedByOrgAgentId: string;
+  newEvidence: string;
+  contestedAt: string;
+}
+
+export interface P0Escalation {
+  id: string;
+  findingId: string;
+  cardId: string;
+  status: 'open' | 'resolved';
+  resolution: string | null;
+  resolvedByUserId: string | null;
+  raisedAt: string;
+  resolvedAt: string | null;
+}
+
 /** The parts of an agent that decide whether it may review another's work. */
 export interface ReviewerIdentity {
   id: string;
