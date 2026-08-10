@@ -1,17 +1,17 @@
-# Hermes Orchestrator — MVP Architecture
+# AI Labs — Core Architecture
 
 ## Purpose
 
-Hermes Orchestrator is a local-first application for managing multiple development projects on one Kanban board and coordinating authenticated AI coding agents in an explicit reporting hierarchy. Hermes is the default root coordinator. Kimi Code, Claude Code, Codex, and future runtimes are invoked through their installed CLIs so each vendor continues to own OAuth storage and token refresh. It has no Buzz dependency.
+AI Labs is a local-first application for managing multiple development projects on one Kanban board and coordinating authenticated AI coding agents in an explicit reporting hierarchy. Kimi Code, Claude Code, Codex, Hermes and future runtimes are invoked through their installed CLIs so each vendor continues to own OAuth storage and token refresh.
 
 ## Runtime shape
 
 ```text
-Browser dashboard (React)
+Client (React)
         |
         | same-origin JSON + event polling
         v
-Local API (Fastify) -------------------- SQLite
+Core service (Fastify) ----------------- SQLite
         |
         +-- task/run state machine
         +-- agent organization and reporting graph
