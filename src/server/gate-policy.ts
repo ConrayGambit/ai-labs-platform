@@ -12,6 +12,11 @@ import {
 /**
  * One reviewer everywhere by default (spec 20.2.1).
  *
+ * Spec 20.2 also lists a G5 "on demand" gate on this ladder. Its absence is
+ * deliberate and confirmed by the owner: a gate that exists but is never
+ * entered is a column nobody uses and a rule nobody reads. Raised in review as
+ * a possible lost requirement, so it is written down rather than rediscovered.
+ *
  * `independentReview` stays true throughout because it describes *how* reviews
  * are filed once a project or card raises the count to two. It simply does not
  * engage at one — there is nobody to be blind from.

@@ -23,6 +23,21 @@ export function canOverride(priority: FindingPriority): boolean {
 }
 
 /**
+ * Whether a ruling goes against the reviewer, and so is an override.
+ *
+ * "A deferral is an override with a date attached" (spec 20.5) — so a deferral
+ * is one, and only adopting is not. This exists as one predicate because the
+ * P0 guard and the register-entry decision are the same question, and while
+ * they were two separate expressions they disagreed: the guard refused
+ * `overridden` on a P0 while the register happily wrote a P0 deferral. Found
+ * in review, and the shape of the bug is why this function exists rather than
+ * two comparisons that have to be kept in step by hand.
+ */
+export function isOverride(outcome: 'adopted' | 'deferred' | 'overridden'): boolean {
+  return outcome !== 'adopted';
+}
+
+/**
  * The worst priority in a set, which is what decides whether work stops.
  *
  * An empty set returns null rather than the softest priority: "nothing serious

@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
+import { createGovernanceService, type GovernanceService } from '../../src/server/governance-service.js';
 
 describe('filing a review', () => {
   let database: OrchestratorDatabase | undefined;
-  afterEach(() => database?.close());
+  let service: GovernanceService | undefined;
+  afterEach(() => { database?.close(); database = undefined; service = undefined; });
 
   function seed() {
     database = createDatabase(':memory:');
+    service = createGovernanceService(database);
     const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
     const venture = database.platform.createVenture({
       portfolioId: portfolio.id, name: 'Research Lab', kind: 'research', mission: 'Evaluate tools.',
@@ -46,7 +49,7 @@ describe('filing a review', () => {
   it('records a review with its findings', () => {
     const { card, reviewer } = seed();
 
-    const review = database!.governance.fileReview({
+    const review = service!.fileReview({
       cardId: card.id,
       gateId: 'G1',
       reviewerOrgAgentId: reviewer.id,
@@ -62,7 +65,7 @@ describe('filing a review', () => {
         evidence: 'src/server/run-supervisor.ts:112',
         proposedFix: 'Evaluate the ceiling against the pending total before persisting.',
       }],
-    });
+    }).review;
 
     expect(review).toMatchObject({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
@@ -79,10 +82,10 @@ describe('filing a review', () => {
   it('accepts a clean review with no findings at all', () => {
     const { card, reviewer } = seed();
 
-    const review = database!.governance.fileReview({
+    const review = service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
-    });
+    }).review;
 
     expect(review.verdict).toBe('approve');
     expect(review.findings).toEqual([]);
@@ -91,7 +94,7 @@ describe('filing a review', () => {
   it('REFUSES a review from an agent that is not a reviewer on this gate', () => {
     const { card, stranger } = seed();
 
-    expect(() => database!.governance.fileReview({
+    expect(() => service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: stranger.id,
       verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
     })).toThrow(/not a reviewer/i);
@@ -103,7 +106,7 @@ describe('filing a review', () => {
 
     // The builder holds an assignment on this gate — as builder. That is not
     // a licence to file a review on its own work.
-    expect(() => database!.governance.fileReview({
+    expect(() => service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: builder.id,
       verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
     })).toThrow(/not a reviewer/i);
@@ -114,7 +117,7 @@ describe('filing a review', () => {
 
     // Every reviewer answers the full checklist. "Not applicable" is an
     // acceptable answer; silence is not (spec 20.3).
-    expect(() => database!.governance.fileReview({
+    expect(() => service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve', checklist: [], whatToPreserve: '', questionsForBuilder: '', findings: [],
     })).toThrow(/checklist/i);
@@ -123,7 +126,7 @@ describe('filing a review', () => {
   it('REFUSES a checklist item left blank, which is silence wearing an answer', () => {
     const { card, reviewer } = seed();
 
-    expect(() => database!.governance.fileReview({
+    expect(() => service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve',
       checklist: [{ item: 'Are negative-access tests present?', answer: '   ' }],
@@ -136,7 +139,7 @@ describe('filing a review', () => {
 
     // Evidence at file:line is what lets a reader go and check rather than
     // take the finding on trust.
-    expect(() => database!.governance.fileReview({
+    expect(() => service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve_with_findings', checklist,
       whatToPreserve: '', questionsForBuilder: '',
@@ -150,7 +153,7 @@ describe('filing a review', () => {
   it('REFUSES a finding with no predicted failure, which is a worry and not a finding', () => {
     const { card, reviewer } = seed();
 
-    expect(() => database!.governance.fileReview({
+    expect(() => service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve_with_findings', checklist,
       whatToPreserve: '', questionsForBuilder: '',
@@ -178,11 +181,11 @@ describe('filing a review', () => {
       cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: second.id,
     });
 
-    const first = database!.governance.fileReview({
+    const first = service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
-    });
-    const other = database!.governance.fileReview({
+    }).review;
+    const other = service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: second.id,
       verdict: 'reject', checklist, whatToPreserve: '', questionsForBuilder: '',
       findings: [{
@@ -190,7 +193,7 @@ describe('filing a review', () => {
         predictedFailure: 'A staff user reads another venture cards.',
         evidence: 'src/server/work-api.ts:88', proposedFix: 'Call assertVentureAccess first.',
       }],
-    });
+    }).review;
 
     expect(first.findings).toEqual([]);
     expect(other.findings).toHaveLength(1);
@@ -202,7 +205,7 @@ describe('filing a review', () => {
   it('SUPERSEDES a reviewer earlier review rather than letting both stand', () => {
     const { card, reviewer } = seed();
 
-    const first = database!.governance.fileReview({
+    const first = service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'reject', checklist, whatToPreserve: '', questionsForBuilder: '',
       findings: [{
@@ -210,11 +213,11 @@ describe('filing a review', () => {
         predictedFailure: 'A staff user reads another venture cards.',
         evidence: 'src/server/work-api.ts:88', proposedFix: 'Check access.',
       }],
-    });
-    const corrected = database!.governance.fileReview({
+    }).review;
+    const corrected = service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
-    });
+    }).review;
 
     // Only one review currently stands, so counting cannot be gamed...
     expect(database!.governance.listCurrentReviews(card.id, 'G1').map((r) => r.id))
@@ -243,11 +246,11 @@ describe('filing a review', () => {
       cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: second.id,
     });
 
-    database!.governance.fileReview({
+    service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
     });
-    database!.governance.fileReview({
+    service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: second.id,
       verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
     });
@@ -258,7 +261,7 @@ describe('filing a review', () => {
 
   it('does not mix a G1 review into G2', () => {
     const { card, reviewer } = seed();
-    database!.governance.fileReview({
+    service!.fileReview({
       cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
       verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
     });

@@ -11,7 +11,7 @@ import {
 } from '../shared/governance.js';
 import type { GateId } from '../shared/work.js';
 import type { OrchestratorDatabase } from './database.js';
-import { canOverride, isBlocking } from './governance-policy.js';
+import { canOverride, isBlocking, isOverride } from './governance-policy.js';
 
 export interface FileReviewResult {
   review: Review;
@@ -46,11 +46,14 @@ export interface AdjudicationResult {
 
 export interface GovernanceService {
   /**
-   * Files a review, and stops the card immediately on any P0 it carries.
+   * The one way to file a review. Stops the card immediately on any P0.
    *
    * Escalation lives here rather than in the repository because stopping a card
    * spans two repositories, and a P0 that recorded a finding without stopping
-   * the work would be a finding nobody had to act on.
+   * the work would be a finding nobody had to act on. The repository's
+   * `insertReviewRecord` writes the record and nothing else; it is deliberately
+   * not named `fileReview`, because it was, and reviews filed through it left
+   * P0s unescalated.
    */
   fileReview(input: FileReviewInput): FileReviewResult;
   adjudicate(input: AdjudicateInput): AdjudicationResult;
@@ -157,7 +160,7 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
   return {
     fileReview(input) {
       return connection.transaction((): FileReviewResult => {
-        const review = database.governance.fileReview(input);
+        const review = database.governance.insertReviewRecord(input);
         const escalations = review.findings
           .filter((finding) => isBlocking(finding.priority))
           .map((finding) => escalate({ id: finding.id, card_id: review.cardId }));
@@ -189,10 +192,12 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         if (rulings.some((ruling) => ruling.isFinal)) {
           throw new Error(`This finding has a final ruling and cannot be reopened: ${input.findingId}`);
         }
-        if (input.outcome === 'overridden' && !canOverride(finding.priority)) {
+        if (isOverride(input.outcome) && !canOverride(finding.priority)) {
           // Not a policy the builder may argue with. It is why the ladder has a
-          // top rung at all.
-          throw new Error('A P0 may not be overridden by the builder; it goes to the owner');
+          // top rung at all. A deferral counts: it is an override with a date.
+          throw new Error(
+            `A P0 may not be ${input.outcome} by the builder; it goes to the owner`,
+          );
         }
         if (input.outcome === 'deferred') {
           // "A deferral is an override with a date attached" (spec 20.5). Both
@@ -242,7 +247,7 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
 
         // Every ruling against a reviewer is logged, and a deferral is an
         // override with a date attached (spec 20.4 rule 4, spec 20.5).
-        const registerEntry = input.outcome === 'adopted' ? null : database.governance.appendOverride({
+        const registerEntry = !isOverride(input.outcome) ? null : database.governance.appendOverride({
           findingId: input.findingId,
           cardId: finding.card_id,
           reviewerOrgAgentId: finding.reviewer_org_agent_id,
@@ -261,7 +266,28 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         // A contest without new evidence is the same opinion said louder.
         throw new Error('A contest must carry new evidence');
       }
-      findingRow(input.findingId);
+      const finding = findingRow(input.findingId);
+      /*
+       * A contest answers a ruling, so there has to be one. Without this the
+       * right could be spent before it existed: contesting first made the
+       * builder's FIRST ruling final, and the reviewer lost the appeal by
+       * exercising it early.
+       */
+      if (listRulings(input.findingId).length === 0) {
+        throw new Error('There is no ruling to contest on this finding yet');
+      }
+      /*
+       * And the contest belongs to the reviewer who raised the finding (spec
+       * 20.4.7). Without this the BUILDER could contest its own finding, make
+       * its own re-ruling final, and shut the real reviewer out with "this
+       * finding has a final ruling" — turning the reviewer's one appeal into
+       * the builder's lock.
+       */
+      if (input.contestedByOrgAgentId !== finding.reviewer_org_agent_id) {
+        throw new Error(
+          'Only the reviewer who raised the finding may contest the ruling on it',
+        );
+      }
       const already = connection
         .prepare('SELECT 1 FROM finding_contests WHERE finding_id = ? AND contested_by_org_agent_id = ?')
         .get(input.findingId, input.contestedByOrgAgentId);

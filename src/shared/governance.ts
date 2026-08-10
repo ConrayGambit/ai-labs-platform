@@ -56,6 +56,11 @@ export interface ReviewVisibilityInput {
  * reviews before ruling on either; seeing one early is how a builder starts
  * adjudicating against a case it has not finished hearing.
  *
+ * That extension was raised in review: 20.3 seals a review only from "the other
+ * reviewer", so sealing the builder is derived from 20.4.1 rather than stated.
+ * The owner confirmed it stays. Recorded here because a future reader comparing
+ * this against 20.3 alone will think it is a bug.
+ *
  * At one reviewer this does not engage: there is nobody to be blind from, and
  * the platform does not pretend otherwise (spec 20.3).
  */

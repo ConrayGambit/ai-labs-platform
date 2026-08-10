@@ -62,13 +62,20 @@ export interface GovernanceRepository {
   getBuilder(cardId: string, gateId: GateId): ReviewAssignment | null;
   listReviewers(cardId: string, gateId: GateId): ReviewAssignment[];
   /**
-   * Files a review with its findings, in one transaction.
+   * Writes a review and its findings, in one transaction.
+   *
+   * NOT the way to file a review. This is the record-writing half; filing a
+   * review also escalates any P0 it carries and stops the card, and that lives
+   * in `GovernanceService.fileReview`. Named `insertReviewRecord` precisely so
+   * a call site that should have gone through the service reads wrong — it was
+   * called `fileReview` here too, and a P0 filed through this path left the
+   * card running with no escalation at all.
    *
    * The reviewer must hold a reviewer assignment on this card at this gate.
-   * Holding a *builder* assignment is not a licence to review — that is the
-   * one thing the role split exists to prevent.
+   * Holding a *builder* assignment is not a licence to review — that is the one
+   * thing the role split exists to prevent.
    */
-  fileReview(input: FileReviewInput): Review;
+  insertReviewRecord(input: FileReviewInput): Review;
   getReview(reviewId: string): Review | null;
   /**
    * Every review ever filed at this gate, superseded ones included. The record
@@ -541,7 +548,7 @@ export function createGovernanceRepository(connection: Database.Database): Gover
 
     listReviewers,
 
-    fileReview(input) {
+    insertReviewRecord(input) {
       return connection.transaction(() => {
         const isReviewer = listReviewers(input.cardId, input.gateId)
           .some((assignment) => assignment.orgAgentId === input.reviewerOrgAgentId);

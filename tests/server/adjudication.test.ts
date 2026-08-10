@@ -180,6 +180,99 @@ describe('adjudication', () => {
     expect(service!.isFindingOpen(findingId)).toBe(true);
   });
 
+  // Found by an external code review. The guard checked only the literal
+  // string 'overridden', while the register-entry decision twelve lines later
+  // correctly treated a deferral as an override. Two expressions, one question,
+  // and they disagreed: a builder could defer a P0 and the register recorded it.
+  it('REFUSES to DEFER a P0, because a deferral is an override with a date', () => {
+    const { card, builder, reviewerA, reviewerB } = seed();
+    const filed = file(card.id, reviewerA.id, [finding({
+      priority: 'P0', area: 'access', finding: 'No venture check.',
+      predictedFailure: 'Cross-venture read.', evidence: 'src/server/work-api.ts:88',
+    })]);
+    file(card.id, reviewerB.id);
+    const findingId = filed.review.findings[0]!.id;
+
+    expect(() => service!.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId, outcome: 'deferred',
+      reason: 'Later.', nextStep: 'Next slice.', deferredUntil: '2026-09-01',
+      ruledByOrgAgentId: builder.id,
+    })).toThrow(/P0 may not be deferred/i);
+    expect(service!.isFindingOpen(findingId)).toBe(true);
+    expect(database!.governance.listOverrides({})).toEqual([]);
+  });
+
+  it('REFUSES a contest before there is any ruling to contest', () => {
+    const { card, reviewerA, reviewerB } = seed();
+    const filed = file(card.id, reviewerA.id, [finding()]);
+    file(card.id, reviewerB.id);
+
+    // Contesting early used to spend the right: it made the builder's FIRST
+    // ruling final, so the reviewer lost the appeal by exercising it.
+    expect(() => service!.contestRuling({
+      findingId: filed.review.findings[0]!.id,
+      contestedByOrgAgentId: reviewerA.id, newEvidence: 'Early.',
+    })).toThrow(/no ruling to contest/i);
+  });
+
+  it('REFUSES a contest from the BUILDER on its own finding', () => {
+    const { card, builder, reviewerA, reviewerB } = seed();
+    const filed = file(card.id, reviewerA.id, [finding()]);
+    file(card.id, reviewerB.id);
+    const findingId = filed.review.findings[0]!.id;
+    service!.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId, outcome: 'overridden',
+      reason: 'Harmless.', residualRisk: 'None.', ruledByOrgAgentId: builder.id,
+    });
+
+    // The builder could contest its own finding, make its own re-ruling final,
+    // and then shut the real reviewer out with "this has a final ruling" —
+    // turning the reviewer's one appeal into the builder's lock.
+    expect(() => service!.contestRuling({
+      findingId, contestedByOrgAgentId: builder.id, newEvidence: 'I disagree with myself.',
+    })).toThrow(/only the reviewer who raised the finding/i);
+
+    // And the real reviewer's appeal still works afterwards.
+    expect(() => service!.contestRuling({
+      findingId, contestedByOrgAgentId: reviewerA.id, newEvidence: 'It is not harmless.',
+    })).not.toThrow();
+  });
+
+  it('REFUSES a contest from a reviewer who did not raise the finding', () => {
+    const { card, builder, reviewerA, reviewerB } = seed();
+    const filed = file(card.id, reviewerA.id, [finding()]);
+    file(card.id, reviewerB.id);
+    const findingId = filed.review.findings[0]!.id;
+    service!.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId, outcome: 'overridden',
+      reason: 'Harmless.', residualRisk: 'None.', ruledByOrgAgentId: builder.id,
+    });
+
+    expect(() => service!.contestRuling({
+      findingId, contestedByOrgAgentId: reviewerB.id, newEvidence: 'Not mine to contest.',
+    })).toThrow(/only the reviewer who raised the finding/i);
+  });
+
+  it('STOPS the card on a P0 filed through the ONLY filing path', () => {
+    const { card, reviewerA } = seed();
+
+    // The repository can still write a review record, but it is named
+    // insertReviewRecord and is not the way a review is filed. Filing goes
+    // through the service, which is what escalates.
+    const filed = service!.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewerA.id,
+      verdict: 'reject', checklist,
+      whatToPreserve: '', questionsForBuilder: '',
+      findings: [finding({
+        priority: 'P0', area: 'access', finding: 'No venture check.',
+        predictedFailure: 'Cross-venture read.', evidence: 'src/server/work-api.ts:88',
+      })],
+    });
+
+    expect(filed.escalations).toHaveLength(1);
+    expect(database!.work.getCard(card.id)?.status).toBe('blocked');
+  });
+
   it('STOPS the card the moment a P0 is filed, and raises it to the owner', () => {
     const { card, reviewerA } = seed();
 

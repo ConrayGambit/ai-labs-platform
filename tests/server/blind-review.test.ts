@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
+import { createGovernanceService } from '../../src/server/governance-service.js';
 import { reviewIsVisibleTo } from '../../src/shared/governance.js';
 
 const base = {
@@ -130,11 +131,12 @@ describe('blind review, through the repository', () => {
     return { project, card, builder, reviewerA, reviewerB };
   }
 
+  // Through the service, because that is the only way a review is filed.
   const file = (cardId: string, reviewerOrgAgentId: string) =>
-    database!.governance.fileReview({
+    createGovernanceService(database!).fileReview({
       cardId, gateId: 'G1', reviewerOrgAgentId, verdict: 'approve',
       checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
-    });
+    }).review;
 
   it('resolves the required count from the project override', () => {
     const { project } = seed(2);
