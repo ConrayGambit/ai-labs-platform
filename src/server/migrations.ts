@@ -807,4 +807,20 @@ export const MIGRATIONS: Migration[] = [
         );
       `,
   },
+  {
+    id: '0020-adjudication-reports',
+    // One report per day, keyed by the date, so rebuilding a day replaces it
+    // rather than leaving two contradictory versions of the same day.
+    //
+    // The date is a UTC day: every timestamp the platform writes comes from
+    // toISOString(), and a report that silently used local time would put a
+    // late-evening override on the wrong day.
+    sql: `
+        CREATE TABLE IF NOT EXISTS adjudication_reports (
+          report_date TEXT PRIMARY KEY,
+          sections_json TEXT NOT NULL,
+          built_at TEXT NOT NULL
+        );
+      `,
+  },
 ];

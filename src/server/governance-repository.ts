@@ -9,6 +9,7 @@ import {
   type FileReviewInput,
   type Finding,
   type FindingInput,
+  type AdjudicationReport,
   type OverrideEntry,
   type Review,
   type ReviewAssignment,
@@ -119,6 +120,10 @@ export interface GovernanceRepository {
   getHandover(cardId: string): CardHandover | null;
   /** Points still unwritten, counting a claimed-output section as unwritten. */
   missingHandoverPoints(cardId: string): HandoverPoint[];
+  /** Stores a day's report, replacing any earlier build of the same day. */
+  saveAdjudicationReport(report: AdjudicationReport): void;
+  getAdjudicationReport(date: string): AdjudicationReport | null;
+  listAdjudicationReports(): AdjudicationReport[];
   /** Sets when an outstanding reviewer stops being able to seal the gate. */
   setReviewDeadline(input: {
     cardId: string; gateId: GateId; orgAgentId: string; deadlineAt: string | null;
@@ -181,6 +186,18 @@ export interface CardSpecification {
   sections: SpecificationSections;
   updatedAt: string;
 }
+
+interface ReportRow {
+  report_date: string;
+  sections_json: string;
+  built_at: string;
+}
+
+const mapReport = (row: ReportRow): AdjudicationReport => ({
+  date: row.report_date,
+  sections: JSON.parse(row.sections_json) as AdjudicationReport['sections'],
+  builtAt: row.built_at,
+});
 
 export interface CardHandover {
   cardId: string;
@@ -746,6 +763,33 @@ export function createGovernanceRepository(connection: Database.Database): Gover
 
     missingHandoverPoints: (cardId) =>
       handoverIsComplete(getHandover(cardId)?.points ?? {}).missing,
+
+    saveAdjudicationReport(report) {
+      // Keyed by date, so rebuilding a day updates it rather than leaving two
+      // contradictory versions of the same day in the record.
+      connection.prepare(`
+        INSERT INTO adjudication_reports (report_date, sections_json, built_at)
+        VALUES (@date, @sectionsJson, @builtAt)
+        ON CONFLICT(report_date) DO UPDATE SET
+          sections_json = excluded.sections_json, built_at = excluded.built_at
+      `).run({
+        date: report.date,
+        sectionsJson: JSON.stringify(report.sections),
+        builtAt: report.builtAt,
+      });
+    },
+
+    getAdjudicationReport(date) {
+      const row = connection
+        .prepare('SELECT * FROM adjudication_reports WHERE report_date = ?')
+        .get(date) as ReportRow | undefined;
+      return row ? mapReport(row) : null;
+    },
+
+    listAdjudicationReports: () =>
+      (connection
+        .prepare('SELECT * FROM adjudication_reports ORDER BY report_date')
+        .all() as ReportRow[]).map(mapReport),
 
     listOverrides(filter) {
       const rows = filter.cardId

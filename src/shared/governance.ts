@@ -179,6 +179,26 @@ export function overrideReference(sequence: number): string {
   return `OV-${String(sequence).padStart(4, '0')}`;
 }
 
+export const ADJUDICATION_SECTIONS = [
+  'p0_escalations',
+  'overrides',
+  'deferrals',
+  'contested_rulings',
+  'gates_passed',
+  'cards_blocked',
+  'cost',
+  'next_work_item',
+] as const;
+
+export type AdjudicationSection = (typeof ADJUDICATION_SECTIONS)[number];
+
+export interface AdjudicationReport {
+  /** A UTC day, `YYYY-MM-DD`. Every stored timestamp is an ISO string. */
+  date: string;
+  sections: Record<AdjudicationSection, string[]>;
+  builtAt: string;
+}
+
 export interface Contest {
   id: string;
   findingId: string;
