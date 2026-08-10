@@ -93,15 +93,15 @@ describe('orchestrator database', () => {
     database = createDatabase(':memory:');
 
     const project = database.createProject({
-      name: 'Hermes Orchestrator',
+      name: 'Example Product',
       path: '/workspaces/example-product',
-      description: 'Local multi-agent coordination dashboard',
+      description: 'Synthetic fixture project',
       color: '#7170ff',
     });
 
     expect(database.listProjects()).toEqual([project]);
     expect(project).toMatchObject({
-      name: 'Hermes Orchestrator',
+      name: 'Example Product',
       path: '/workspaces/example-product',
       color: '#7170ff',
     });
