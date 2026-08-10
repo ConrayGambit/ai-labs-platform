@@ -7,6 +7,7 @@ import { applyMigrations } from './migrations.js';
 import { createIdentityRepository, type IdentityRepository } from './identity-repository.js';
 import { createOrgRepository, type OrgRepository } from './org-repository.js';
 import { createPlatformRepository, type PlatformRepository } from './platform-repository.js';
+import { createRoomRepository, type RoomRepository } from './room-repository.js';
 import { createWorkRepository, type WorkRepository } from './work-repository.js';
 import { assertTenureOrdering, type Dedication, type ExpiryKind, type Tenure } from '../shared/org.js';
 import type {
@@ -767,6 +768,8 @@ export interface OrchestratorDatabase {
   platform: PlatformRepository;
   /** The card board agents work off: cards, owner notes, activity, artifacts. */
   work: WorkRepository;
+  /** Per-card rooms: membership, one-level threads and a shared canvas. */
+  rooms: RoomRepository;
   close(): void;
 }
 
@@ -1540,6 +1543,7 @@ export function createDatabase(filename: string): OrchestratorDatabase {
     org: createOrgRepository(connection),
     platform: createPlatformRepository(connection),
     work: createWorkRepository(connection),
+    rooms: createRoomRepository(connection),
     close() {
       connection.close();
     },

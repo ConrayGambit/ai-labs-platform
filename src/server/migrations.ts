@@ -482,4 +482,53 @@ export const MIGRATIONS: Migration[] = [
         ALTER TABLE cards ADD COLUMN reviewer_raised_by_user_id TEXT REFERENCES users(id);
       `,
   },
+  {
+    id: '0010-rooms',
+    // Where agents and the owner talk about a card. One room per card, enforced
+    // by the UNIQUE on card_id rather than by whoever remembers to check.
+    //
+    // Threads are one level deep: thread_id points at a top-level message, and
+    // a message with a thread_id may not itself be replied to. That is enforced
+    // in the repository, since SQLite cannot express "the parent's thread_id is
+    // null" as a constraint.
+    sql: `
+        CREATE TABLE IF NOT EXISTS rooms (
+          id TEXT PRIMARY KEY,
+          card_id TEXT NOT NULL UNIQUE REFERENCES cards(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','archived')),
+          created_at TEXT NOT NULL,
+          archived_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS room_members (
+          room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+          member_kind TEXT NOT NULL CHECK(member_kind IN ('user','org_agent')),
+          member_id TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          PRIMARY KEY (room_id, member_kind, member_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS room_messages (
+          id TEXT PRIMARY KEY,
+          room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+          thread_id TEXT REFERENCES room_messages(id) ON DELETE CASCADE,
+          author_kind TEXT NOT NULL CHECK(author_kind IN ('user','org_agent','system')),
+          author_id TEXT,
+          run_id TEXT,
+          body TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          sequence INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS room_messages_room ON room_messages(room_id, sequence);
+        CREATE INDEX IF NOT EXISTS room_messages_thread ON room_messages(thread_id, sequence);
+
+        CREATE TABLE IF NOT EXISTS room_canvas (
+          room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
+          revision INTEGER NOT NULL DEFAULT 0,
+          content TEXT NOT NULL DEFAULT '',
+          updated_at TEXT
+        );
+      `,
+  },
 ];
