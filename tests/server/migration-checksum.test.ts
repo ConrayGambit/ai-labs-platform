@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -74,6 +74,41 @@ describe('built and source builds agree on checksums', () => {
   });
 
   const builtDatabase = resolve('dist/server/server/database.js');
+
+  /**
+   * CI builds before it tests, so there the artifact is always present. Anywhere
+   * else somebody may reasonably run vitest without having built first.
+   */
+  const inCI = process.env.CI === 'true' || process.env.CI === '1';
+
+  /*
+   * The check below is gated on a build artifact, which is how it came to run
+   * nowhere at all: `npm test` ran BEFORE `npm run build` in both the verify
+   * script and the workflow, `dist/` is not committed, and a clean checkout
+   * therefore skipped it on every push and every pull request while the run
+   * stayed green. A check that silently does not run is the same failure this
+   * file exists to catch, wearing the colour of a pass.
+   *
+   * These two guard the guard. One asserts the artifact is genuinely there when
+   * CI claims to have checked parity; the other asserts the verify script still
+   * builds before it tests, since CI runs its steps individually and would stay
+   * green while the local contract rotted.
+   */
+  it.runIf(inCI)('has the built server present, so the parity check really ran', () => {
+    expect(existsSync(builtDatabase)).toBe(true);
+  });
+
+  it('verifies in an order that leaves the built server available', () => {
+    const manifest = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const steps = manifest.scripts.verify.split('&&').map((step) => step.trim());
+    const build = steps.indexOf('npm run build');
+    const test = steps.indexOf('npm test');
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(test).toBeGreaterThanOrEqual(0);
+    expect(build).toBeLessThan(test);
+  });
 
   it.runIf(existsSync(builtDatabase))(
     'opens a database created by the built server under the source build',

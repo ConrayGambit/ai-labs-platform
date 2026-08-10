@@ -36,8 +36,13 @@ jobs:
         run: npm run guard:history
 
       - run: npm run typecheck
-      - run: npm test
+
+      # Build BEFORE test, and keep it that way. The migration parity check is
+      # gated on dist/, which is not committed, so testing first skipped it on
+      # every clean checkout — that is, on every run this workflow has ever
+      # done — while the job still went green.
       - run: npm run build
+      - run: npm test
 
   # Separate job, and deliberately not on windows-latest. gitleaks-action asks
   # for gitleaks_<version>_windows_x64.tar.gz, but gitleaks publishes .zip for

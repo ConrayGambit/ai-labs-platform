@@ -24,7 +24,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "guard": "node scripts/check-no-real-data.mjs",
     "guard:history": "node scripts/check-no-real-data.mjs --history",
-    "verify": "npm run guard && npm run typecheck && npm test && npm run build"
+    "verify": "npm run guard && npm run typecheck && npm run build && npm test"
   },
   "dependencies": {
     "@fastify/static": "10.1.3",
