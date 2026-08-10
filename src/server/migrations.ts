@@ -248,4 +248,33 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    id: '0002-identity',
+    up: (connection) => {
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          display_name TEXT NOT NULL,
+          role TEXT NOT NULL CHECK(role IN ('owner', 'staff', 'observer')),
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        -- Exactly one owner, enforced by the database rather than by convention.
+        CREATE UNIQUE INDEX IF NOT EXISTS users_single_owner
+          ON users(role) WHERE role = 'owner';
+
+        CREATE TABLE IF NOT EXISTS user_venture_grants (
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          venture_id TEXT NOT NULL,
+          granted_at TEXT NOT NULL,
+          PRIMARY KEY (user_id, venture_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS user_venture_grants_venture
+          ON user_venture_grants(venture_id);
+      `);
+    },
+  },
 ];

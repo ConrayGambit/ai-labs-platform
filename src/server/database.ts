@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { TASK_STATUSES } from '../shared/domain.js';
 import { applyMigrations } from './migrations.js';
+import { createIdentityRepository, type IdentityRepository } from './identity-repository.js';
 import type {
   AgentKind,
   AgentOutputFormat,
@@ -720,6 +721,8 @@ export interface OrchestratorDatabase {
   listRunMessages(runId: string): RunMessage[];
   listRecentRuns(limit?: number): RecentRun[];
   getDashboardStats(): DashboardStats;
+  /** Human identities, roles and venture-scoped access. Deny by default. */
+  identity: IdentityRepository;
   close(): void;
 }
 
@@ -1441,6 +1444,7 @@ export function createDatabase(filename: string): OrchestratorDatabase {
         tasksByStatus,
       };
     },
+    identity: createIdentityRepository(connection),
     close() {
       connection.close();
     },
