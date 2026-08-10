@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
   canReview,
+  overrideReference,
   reviewIsVisibleTo,
   type AssignRoleInput,
   type ChecklistAnswer,
   type FileReviewInput,
   type Finding,
   type FindingInput,
+  type OverrideEntry,
   type Review,
   type ReviewAssignment,
   type ReviewerIdentity,
@@ -85,6 +87,16 @@ export interface GovernanceRepository {
    * rule, the adjudication gate and the advancement rule all read one answer.
    */
   requiredReviewers(cardId: string, gateId: GateId): number;
+  /**
+   * Adds an entry to the override register. The ONLY writer.
+   *
+   * There is deliberately no update and no delete: a correction is a new entry
+   * through supersedeOverride, and the database refuses anything else.
+   */
+  appendOverride(input: AppendOverrideInput): OverrideEntry;
+  /** Corrects an entry by adding a new one and marking the original superseded. */
+  supersedeOverride(input: SupersedeOverrideInput): OverrideEntry;
+  listOverrides(filter: { cardId?: string }): OverrideEntry[];
   /** Sets when an outstanding reviewer stops being able to seal the gate. */
   setReviewDeadline(input: {
     cardId: string; gateId: GateId; orgAgentId: string; deadlineAt: string | null;
@@ -140,6 +152,59 @@ const mapReview = (row: ReviewRow, findings: Finding[]): Review => ({
   findings,
   supersededByReviewId: row.superseded_by_review_id,
   filedAt: row.filed_at,
+});
+
+export interface AppendOverrideInput {
+  findingId: string | null;
+  cardId: string | null;
+  reviewerOrgAgentId: string | null;
+  priority: OverrideEntry['priority'];
+  reason: string;
+  residualRisk: string;
+  deferredUntil?: string | null;
+  supersedesId?: string | null;
+  createdByOrgAgentId: string | null;
+}
+
+export interface SupersedeOverrideInput {
+  supersedesId: string;
+  reason: string;
+  residualRisk: string;
+  createdByOrgAgentId: string | null;
+}
+
+interface OverrideRow {
+  id: string;
+  reference: string;
+  sequence: number;
+  finding_id: string | null;
+  card_id: string | null;
+  reviewer_org_agent_id: string | null;
+  priority: OverrideEntry['priority'];
+  reason: string;
+  residual_risk: string;
+  deferred_until: string | null;
+  supersedes_id: string | null;
+  superseded_by_id: string | null;
+  created_by_org_agent_id: string | null;
+  created_at: string;
+}
+
+const mapOverride = (row: OverrideRow): OverrideEntry => ({
+  id: row.id,
+  reference: row.reference,
+  sequence: row.sequence,
+  findingId: row.finding_id,
+  cardId: row.card_id,
+  reviewerOrgAgentId: row.reviewer_org_agent_id,
+  priority: row.priority,
+  reason: row.reason,
+  residualRisk: row.residual_risk,
+  deferredUntil: row.deferred_until,
+  supersedesId: row.supersedes_id,
+  supersededById: row.superseded_by_id,
+  createdByOrgAgentId: row.created_by_org_agent_id,
+  createdAt: row.created_at,
 });
 
 /**
@@ -250,6 +315,49 @@ export function createGovernanceRepository(connection: Database.Database): Gover
       project: project?.reviewer_count_override ?? null,
     });
   };
+
+  /**
+   * Allocates the next reference and writes the entry, in one transaction.
+   *
+   * The sequence is read and used inside that transaction, and the column is
+   * UNIQUE, so two concurrent overrides cannot share a reference: the loser
+   * fails rather than quietly reusing OV-0007.
+   */
+  const appendOverride = (input: AppendOverrideInput): OverrideEntry =>
+    connection.transaction((): OverrideEntry => {
+      const { next } = connection
+        .prepare('SELECT COALESCE(MAX(sequence) + 1, 1) AS next FROM override_register')
+        .get() as { next: number };
+      const id = randomUUID();
+      connection.prepare(`
+        INSERT INTO override_register (
+          id, reference, sequence, finding_id, card_id, reviewer_org_agent_id,
+          priority, reason, residual_risk, deferred_until, supersedes_id,
+          created_by_org_agent_id, created_at
+        ) VALUES (
+          @id, @reference, @sequence, @findingId, @cardId, @reviewerOrgAgentId,
+          @priority, @reason, @residualRisk, @deferredUntil, @supersedesId,
+          @createdByOrgAgentId, @createdAt
+        )
+      `).run({
+        id,
+        reference: overrideReference(next),
+        sequence: next,
+        findingId: input.findingId,
+        cardId: input.cardId,
+        reviewerOrgAgentId: input.reviewerOrgAgentId,
+        priority: input.priority,
+        reason: input.reason,
+        residualRisk: input.residualRisk,
+        deferredUntil: input.deferredUntil ?? null,
+        supersedesId: input.supersedesId ?? null,
+        createdByOrgAgentId: input.createdByOrgAgentId,
+        createdAt: new Date().toISOString(),
+      });
+      return mapOverride(
+        connection.prepare('SELECT * FROM override_register WHERE id = ?').get(id) as OverrideRow,
+      );
+    })();
 
   const requireReview = (reviewId: string): Review => {
     const row = selectReview.get(reviewId) as ReviewRow | undefined;
@@ -458,5 +566,47 @@ export function createGovernanceRepository(connection: Database.Database): Gover
 
     listCurrentReviews,
     requiredReviewers: requiredReviewersFor,
+
+    appendOverride: (input) => appendOverride(input),
+
+    supersedeOverride(input) {
+      return connection.transaction((): OverrideEntry => {
+        const original = connection
+          .prepare('SELECT * FROM override_register WHERE id = ?')
+          .get(input.supersedesId) as OverrideRow | undefined;
+        if (!original) throw new Error(`Override not found: ${input.supersedesId}`);
+        if (original.superseded_by_id) {
+          throw new Error(
+            `${original.reference} was already superseded by an entry; correct that one instead`,
+          );
+        }
+        // The correction carries the original's subject forward: it is about
+        // the same finding, so it must be findable from the same card.
+        const correction = appendOverride({
+          findingId: original.finding_id,
+          cardId: original.card_id,
+          reviewerOrgAgentId: original.reviewer_org_agent_id,
+          priority: original.priority,
+          reason: input.reason,
+          residualRisk: input.residualRisk,
+          supersedesId: original.id,
+          createdByOrgAgentId: input.createdByOrgAgentId,
+        });
+        // The one permitted transition on an existing row: null to a value.
+        connection
+          .prepare('UPDATE override_register SET superseded_by_id = ? WHERE id = ?')
+          .run(correction.id, original.id);
+        return correction;
+      })();
+    },
+
+    listOverrides(filter) {
+      const rows = filter.cardId
+        ? connection
+          .prepare('SELECT * FROM override_register WHERE card_id = ? ORDER BY sequence')
+          .all(filter.cardId)
+        : connection.prepare('SELECT * FROM override_register ORDER BY sequence').all();
+      return (rows as OverrideRow[]).map(mapOverride);
+    },
   };
 }

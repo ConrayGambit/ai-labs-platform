@@ -722,4 +722,64 @@ export const MIGRATIONS: Migration[] = [
           ON p0_escalations(status, raised_at);
       `,
   },
+  {
+    id: '0017-override-register',
+    // Append-only, and enforced as such. OV-NNNN entries are never edited or
+    // removed: a correction is a NEW entry marking the original superseded.
+    //
+    // The triggers are the point. A rule that lives only in a repository method
+    // is a rule until somebody writes a second repository method.
+    //
+    // Every comparison below uses IS NOT rather than <>, which is null-safe.
+    // With <>, setting a nullable column to NULL yields NULL rather than true
+    // in SQL's three-valued logic, and the edit slips straight past the guard —
+    // clearing a supersede marker being the case that matters.
+    sql: `
+        CREATE TABLE IF NOT EXISTS override_register (
+          id TEXT PRIMARY KEY,
+          reference TEXT NOT NULL UNIQUE,
+          sequence INTEGER NOT NULL UNIQUE,
+          finding_id TEXT REFERENCES review_findings(id),
+          card_id TEXT REFERENCES cards(id),
+          reviewer_org_agent_id TEXT REFERENCES org_agents(id),
+          priority TEXT NOT NULL CHECK(priority IN ('P0','P1','P2','P3','P4')),
+          reason TEXT NOT NULL,
+          residual_risk TEXT NOT NULL DEFAULT '',
+          deferred_until TEXT,
+          supersedes_id TEXT REFERENCES override_register(id),
+          superseded_by_id TEXT REFERENCES override_register(id),
+          created_by_org_agent_id TEXT REFERENCES org_agents(id),
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS override_register_card
+          ON override_register(card_id, sequence);
+
+        CREATE TRIGGER IF NOT EXISTS override_register_no_delete
+        BEFORE DELETE ON override_register
+        BEGIN
+          SELECT RAISE(ABORT, 'The override register is append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS override_register_no_edit
+        BEFORE UPDATE ON override_register
+        FOR EACH ROW WHEN
+          NEW.reference IS NOT OLD.reference
+          OR NEW.sequence IS NOT OLD.sequence
+          OR NEW.finding_id IS NOT OLD.finding_id
+          OR NEW.card_id IS NOT OLD.card_id
+          OR NEW.reviewer_org_agent_id IS NOT OLD.reviewer_org_agent_id
+          OR NEW.priority IS NOT OLD.priority
+          OR NEW.reason IS NOT OLD.reason
+          OR NEW.residual_risk IS NOT OLD.residual_risk
+          OR NEW.deferred_until IS NOT OLD.deferred_until
+          OR NEW.supersedes_id IS NOT OLD.supersedes_id
+          OR NEW.created_by_org_agent_id IS NOT OLD.created_by_org_agent_id
+          OR NEW.created_at IS NOT OLD.created_at
+          OR (OLD.superseded_by_id IS NOT NULL
+              AND NEW.superseded_by_id IS NOT OLD.superseded_by_id)
+        BEGIN
+          SELECT RAISE(ABORT, 'The override register is append-only');
+        END;
+      `,
+  },
 ];

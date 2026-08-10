@@ -5,6 +5,7 @@ import {
   type Finding,
   type P0Escalation,
   type Review,
+  type OverrideEntry,
   type Ruling,
   type RulingOutcome,
 } from '../shared/governance.js';
@@ -27,22 +28,20 @@ export interface AdjudicateInput {
   /** Required on a deferral. */
   nextStep?: string;
   residualRisk?: string;
+  /** Records a deferral's date in the register. A deferral is a dated override. */
+  deferredUntil?: string;
   ruledByOrgAgentId: string;
-}
-
-export interface OverrideRecord {
-  findingId: string;
-  cardId: string;
-  reviewerOrgAgentId: string;
-  priority: Finding['priority'];
-  reason: string;
-  residualRisk: string;
 }
 
 export interface AdjudicationResult {
   ruling: Ruling;
-  /** Present when the outcome was an override, for the register (Task 5). */
-  override: OverrideRecord | null;
+  /**
+   * The register entry this ruling produced, or null for an adopted finding.
+   *
+   * Adopting is not an override: the builder agreed with the reviewer and fixed
+   * it, and a register full of agreements is a register nobody reads.
+   */
+  registerEntry: OverrideEntry | null;
 }
 
 export interface GovernanceService {
@@ -230,19 +229,20 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         const ruling = mapRuling(
           connection.prepare('SELECT * FROM finding_rulings WHERE id = ?').get(id) as RulingRow,
         );
-        return {
-          ruling,
-          override: input.outcome === 'overridden'
-            ? {
-              findingId: input.findingId,
-              cardId: finding.card_id,
-              reviewerOrgAgentId: finding.reviewer_org_agent_id,
-              priority: finding.priority,
-              reason: input.reason,
-              residualRisk: input.residualRisk ?? '',
-            }
-            : null,
-        };
+
+        // Every ruling against a reviewer is logged, and a deferral is an
+        // override with a date attached (spec 20.4 rule 4, spec 20.5).
+        const registerEntry = input.outcome === 'adopted' ? null : database.governance.appendOverride({
+          findingId: input.findingId,
+          cardId: finding.card_id,
+          reviewerOrgAgentId: finding.reviewer_org_agent_id,
+          priority: finding.priority,
+          reason: input.reason,
+          residualRisk: input.residualRisk ?? '',
+          deferredUntil: input.outcome === 'deferred' ? input.deferredUntil ?? null : null,
+          createdByOrgAgentId: input.ruledByOrgAgentId,
+        });
+        return { ruling, registerEntry };
       })();
     },
 

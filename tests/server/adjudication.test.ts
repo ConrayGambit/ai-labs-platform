@@ -127,7 +127,10 @@ describe('adjudication', () => {
       residualRisk: 'One redundant row per stopped run.',
       ruledByOrgAgentId: builder.id,
     });
-    expect(result.override).toMatchObject({ priority: 'P2', reviewerOrgAgentId: reviewerA.id });
+    // The ruling produces the register entry itself, not a description of one.
+    expect(result.registerEntry).toMatchObject({
+      priority: 'P2', reviewerOrgAgentId: reviewerA.id, reference: 'OV-0001',
+    });
   });
 
   it('REFUSES an override of a P0, and leaves the finding open', () => {

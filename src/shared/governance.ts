@@ -151,6 +151,32 @@ export interface Ruling {
   ruledAt: string;
 }
 
+export interface OverrideEntry {
+  id: string;
+  /** `OV-0001`. Zero-padded to four digits so entries sort as they read. */
+  reference: string;
+  sequence: number;
+  findingId: string | null;
+  cardId: string | null;
+  reviewerOrgAgentId: string | null;
+  priority: FindingPriority;
+  reason: string;
+  residualRisk: string;
+  /** Set when this entry records a deferral rather than a plain override. */
+  deferredUntil: string | null;
+  /** The entry this one corrects, if it corrects one. */
+  supersedesId: string | null;
+  /** Set once, when a later entry corrects this one. Never cleared. */
+  supersededById: string | null;
+  createdByOrgAgentId: string | null;
+  createdAt: string;
+}
+
+/** `OV-0001`. Four digits, so the register reads in order at a glance. */
+export function overrideReference(sequence: number): string {
+  return `OV-${String(sequence).padStart(4, '0')}`;
+}
+
 export interface Contest {
   id: string;
   findingId: string;
