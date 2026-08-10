@@ -132,6 +132,39 @@ describe('organization repository', () => {
     expect(expired?.enabled).toBe(false);
   });
 
+  it('re-parents reports on expiry rather than leaving them under a disabled agent', () => {
+    const db = openWithExecutives();
+    const lead = db.createOrgAgent({
+      name: 'Temp lead',
+      jobTitle: 'Temp lead',
+      department: 'Delivery',
+      jobFunction: 'Leads',
+      responsibilities: 'Leads',
+      runtimeId: 'claude',
+      managerId: 'exec-ceo',
+      canDelegate: true,
+      tenure: 'temporary',
+      expiryKind: 'manual',
+    });
+    const report = db.createOrgAgent({
+      name: 'Temp report',
+      jobTitle: 'Contributor',
+      department: 'Delivery',
+      jobFunction: 'Builds',
+      responsibilities: 'Builds',
+      runtimeId: 'claude',
+      managerId: lead.id,
+      tenure: 'temporary',
+      expiryKind: 'manual',
+    });
+
+    db.org.expireAgent(lead.id);
+
+    expect(db.getOrgAgent(report.id)?.managerId).toBe('exec-ceo');
+    expect(db.getOrgAgent(report.id)?.enabled).toBe(true);
+    expect(db.getOrgAgent(lead.id)?.enabled).toBe(false);
+  });
+
   it('scopes departments to a venture', () => {
     const db = openWithExecutives();
     const engineering = db.org.createDepartment({ ventureId: 'venture-a', name: 'Engineering' });

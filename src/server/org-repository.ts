@@ -71,6 +71,11 @@ export function createOrgRepository(connection: Database.Database): OrgRepositor
     return agent;
   };
 
+  const directReportsOf = (orgAgentId: string) =>
+    connection.prepare('SELECT id FROM org_agents WHERE manager_id = ?').all(orgAgentId) as Array<{
+      id: string;
+    }>;
+
   return {
     createDepartment(input) {
       const department: Department = {
@@ -129,14 +134,30 @@ export function createOrgRepository(connection: Database.Database): OrgRepositor
       if (agent.tenure === 'permanent') {
         throw new Error(`Permanent staff cannot be expired: ${orgAgentId}`);
       }
+      // Expiry must not orphan reports any more than deletion may. Re-parenting to
+      // the departing agent's own manager always preserves tenure ordering, since
+      // that manager's rank is already at least the departing agent's, which is
+      // already at least any report's.
+      const reports = directReportsOf(orgAgentId);
+      if (reports.length > 0 && agent.manager_id === null) {
+        throw new Error(
+          `Cannot expire ${orgAgentId}: it has direct reports and no manager to re-parent them to.`,
+        );
+      }
       connection.transaction(() => {
+        const now = new Date().toISOString();
+        for (const report of reports) {
+          connection
+            .prepare('UPDATE org_agents SET manager_id = ?, updated_at = ? WHERE id = ?')
+            .run(agent.manager_id, now, report.id);
+        }
         // Release assignments so the work surfaces to a lead rather than vanishing.
         connection
           .prepare('DELETE FROM project_agent_assignments WHERE org_agent_id = ?')
           .run(orgAgentId);
         connection
           .prepare('UPDATE org_agents SET enabled = 0, updated_at = ? WHERE id = ?')
-          .run(new Date().toISOString(), orgAgentId);
+          .run(now, orgAgentId);
       })();
     },
 
@@ -148,9 +169,7 @@ export function createOrgRepository(connection: Database.Database): OrgRepositor
             'protected action.',
         );
       }
-      const reports = connection
-        .prepare('SELECT id FROM org_agents WHERE manager_id = ?')
-        .all(orgAgentId) as Array<{ id: string }>;
+      const reports = directReportsOf(orgAgentId);
       if (reports.length > 0 && agent.manager_id === null) {
         throw new Error(
           `Cannot remove ${orgAgentId}: it has direct reports and no manager to re-parent them to.`,
