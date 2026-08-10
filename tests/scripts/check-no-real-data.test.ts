@@ -38,15 +38,25 @@ describe('no-real-data guard', () => {
     expect(violations[0].rule).toBe('denylist-term');
   });
 
+  // Built from \u escapes rather than pasted, so this file stays pure ASCII and
+  // cannot itself be damaged by an encoding round trip or a bulk text rewrite.
+  const EM_DASH = '—';
+  const MANGLED_EM_DASH = 'â€”'; // what Windows-1252 makes of it
+  const MANGLED_ARROW = 'â†’';
+
   it('flags UTF-8 text mangled by an ANSI round trip', () => {
-    // What a PowerShell Get-Content/Set-Content splice does to an em dash.
-    const mangled = 'design language inferred from the brief — no boilerplate';
+    const mangled = `design language inferred from the brief ${MANGLED_EM_DASH} no boilerplate`;
     const violations = findViolations('src/server/database.ts', mangled, []);
     expect(violations[0].rule).toBe('encoding-corruption');
   });
 
+  it('flags a mangled arrow as well as a mangled dash', () => {
+    const violations = findViolations('src/a.ts', `decompose ${MANGLED_ARROW} spawn`, []);
+    expect(violations[0].rule).toBe('encoding-corruption');
+  });
+
   it('allows the correctly encoded character', () => {
-    const clean = 'design language inferred from the brief — no boilerplate';
+    const clean = `design language inferred from the brief ${EM_DASH} no boilerplate`;
     expect(findViolations('src/server/database.ts', clean, [])).toEqual([]);
   });
 

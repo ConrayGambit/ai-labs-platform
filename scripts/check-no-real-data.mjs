@@ -33,7 +33,18 @@ const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 // line-splice round trip silently mangles every non-ASCII character. It corrupted
 // seeded agent instructions once and no test noticed, because tests assert ids
 // and models rather than prose.
-const MOJIBAKE = /â€[-”“™]|→|Â[§·°±»«]/g;
+// Built with fromCharCode so this file stays pure ASCII. A rule containing the
+// byte sequences it detects is destroyed by the next encoding round trip or bulk
+// text rewrite - which is exactly what happened the first time it was written.
+//
+// Signature of UTF-8 read as Windows-1252: a-circumflex (U+00E2) or its capital
+// (U+00C2) immediately followed by another non-ASCII character. Legitimate text
+// uses those letters before ASCII letters, never before punctuation.
+const MOJIBAKE_LEAD = String.fromCharCode(0x00e2) + String.fromCharCode(0x00c3);
+const MOJIBAKE = new RegExp(
+  '[' + MOJIBAKE_LEAD + ']' + '[\\u0080-\\u00ff\\u2000-\\u20ff\\u2122]',
+  'g',
+);
 
 /**
  * @param {string} file
