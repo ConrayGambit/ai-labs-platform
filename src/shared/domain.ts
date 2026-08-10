@@ -1,3 +1,5 @@
+import type { Dedication, ExpiryKind, Tenure } from './org.js';
+
 export type AgentKind = 'hermes' | 'kimi' | 'claude' | 'codex' | 'custom';
 export type PromptTransport = 'argument' | 'stdin';
 export type AgentOutputFormat = 'text' | 'json' | 'jsonl';
@@ -113,6 +115,17 @@ export interface OrgAgent {
   effort: string | null;
   skillIds: string[];
   enabled: boolean;
+  /** Permanent staff cannot be deleted. Temporary staff require an expiry condition. */
+  tenure: Tenure;
+  expiryKind: ExpiryKind | null;
+  expiryAt: string | null;
+  ventureId: string | null;
+  departmentId: string | null;
+  /** Recorded because it determines memory scope, not as documentation. */
+  dedication: Dedication;
+  dedicationReason: string | null;
+  /** Set when this agent reports to a human. The owner sits at the root. */
+  reportsToUserId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -133,6 +146,14 @@ export interface CreateOrgAgentInput {
   speed?: string | null;
   effort?: string | null;
   skillIds?: string[];
+  /** Defaults to 'hired'. 'temporary' requires expiryKind. */
+  tenure?: Tenure;
+  expiryKind?: ExpiryKind;
+  expiryAt?: string | null;
+  ventureId?: string | null;
+  departmentId?: string | null;
+  dedication?: Dedication;
+  dedicationReason?: string | null;
 }
 
 export interface Project {

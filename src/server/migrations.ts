@@ -277,4 +277,59 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: '0003-org-tenure',
+    up: (connection) => {
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS departments (
+          id TEXT PRIMARY KEY,
+          venture_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE (venture_id, name)
+        );
+
+        ALTER TABLE org_agents ADD COLUMN venture_id TEXT;
+        ALTER TABLE org_agents ADD COLUMN department_id TEXT REFERENCES departments(id);
+        ALTER TABLE org_agents ADD COLUMN tenure TEXT NOT NULL DEFAULT 'hired'
+          CHECK(tenure IN ('permanent', 'hired', 'temporary'));
+        ALTER TABLE org_agents ADD COLUMN expiry_kind TEXT;
+        ALTER TABLE org_agents ADD COLUMN expiry_at TEXT;
+        ALTER TABLE org_agents ADD COLUMN dedication TEXT NOT NULL DEFAULT 'shared'
+          CHECK(dedication IN ('shared', 'dedicated'));
+        ALTER TABLE org_agents ADD COLUMN dedication_reason TEXT;
+
+        CREATE INDEX IF NOT EXISTS org_agents_venture ON org_agents(venture_id);
+        CREATE INDEX IF NOT EXISTS departments_venture ON departments(venture_id);
+
+        -- The seeded executive team is permanent staff, in existing databases too.
+        UPDATE org_agents SET tenure = 'permanent' WHERE id LIKE 'exec-%';
+      `);
+    },
+  },
+  {
+    id: '0003b-reseed-markers',
+    up: (connection) => {
+      connection.exec(`
+        -- Seeding updates doctrine text only where the owner has not edited it,
+        -- and never touches model, speed, effort or runtime after first insert.
+        ALTER TABLE org_agents ADD COLUMN doctrine_edited_at TEXT;
+        ALTER TABLE org_agents ADD COLUMN tuning_edited_at TEXT;
+      `);
+    },
+  },
+  {
+    id: '0003c-org-graph',
+    up: (connection) => {
+      connection.exec(`
+        ALTER TABLE org_agents ADD COLUMN reports_to_user_id TEXT REFERENCES users(id);
+
+        -- The Chief of Staff becomes a coordinating layer rather than a peer.
+        UPDATE org_agents
+           SET manager_id = 'exec-chief-of-staff'
+         WHERE id IN ('exec-cto', 'exec-cmo', 'exec-cdo')
+           AND manager_id = 'exec-ceo';
+      `);
+    },
+  },
 ];

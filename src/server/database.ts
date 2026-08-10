@@ -5,6 +5,8 @@ import { dirname } from 'node:path';
 import { TASK_STATUSES } from '../shared/domain.js';
 import { applyMigrations } from './migrations.js';
 import { createIdentityRepository, type IdentityRepository } from './identity-repository.js';
+import { createOrgRepository, type OrgRepository } from './org-repository.js';
+import { assertTenureOrdering, type Dedication, type ExpiryKind, type Tenure } from '../shared/org.js';
 import type {
   AgentKind,
   AgentOutputFormat,
@@ -102,6 +104,14 @@ interface OrgAgentRow {
   effort: string | null;
   skill_ids?: string | null;
   enabled: number;
+  tenure: Tenure;
+  expiry_kind: ExpiryKind | null;
+  expiry_at: string | null;
+  venture_id: string | null;
+  department_id: string | null;
+  dedication: Dedication;
+  dedication_reason: string | null;
+  reports_to_user_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -430,6 +440,24 @@ const BUILTIN_SKILLS = [
 ] as const;
 
 /**
+ * Seeded reporting lines. Aria is the root of the agent graph and reports to the
+ * owner once a user exists. The Chief of Staff is a coordinating layer rather
+ * than a peer, per the role definition.
+ *
+ * The Chief Innovation Officer reports to the Group CEO, not the Chief of Staff:
+ * her promotion boundary is the owner's alone, and routing her through the Chief
+ * of Staff would imply an approval path that does not exist.
+ */
+const EXECUTIVE_MANAGER: Record<string, string | null> = {
+  'exec-ceo': null,
+  'exec-chief-of-staff': 'exec-ceo',
+  'exec-cino': 'exec-ceo',
+  'exec-cto': 'exec-chief-of-staff',
+  'exec-cmo': 'exec-chief-of-staff',
+  'exec-cdo': 'exec-chief-of-staff',
+};
+
+/**
  * Prebuilt executive team for the default organization. Seeded only for
  * file-backed databases (production), never for :memory: test fixtures.
  * Stable ids keep reseeding idempotent via INSERT OR IGNORE.
@@ -620,6 +648,14 @@ function mapOrgAgent(row: OrgAgentRow): OrgAgent {
     effort: row.effort ?? null,
     skillIds: row.skill_ids ? row.skill_ids.split(',').filter(Boolean) : [],
     enabled: row.enabled === 1,
+    tenure: row.tenure,
+    expiryKind: row.expiry_kind ?? null,
+    expiryAt: row.expiry_at ?? null,
+    ventureId: row.venture_id ?? null,
+    departmentId: row.department_id ?? null,
+    dedication: row.dedication,
+    dedicationReason: row.dedication_reason ?? null,
+    reportsToUserId: row.reports_to_user_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -723,6 +759,8 @@ export interface OrchestratorDatabase {
   getDashboardStats(): DashboardStats;
   /** Human identities, roles and venture-scoped access. Deny by default. */
   identity: IdentityRepository;
+  /** Departments, tenure, permanence and re-parenting. */
+  org: OrgRepository;
   close(): void;
 }
 
@@ -852,11 +890,24 @@ export function createDatabase(filename: string): OrchestratorDatabase {
         INSERT OR IGNORE INTO org_agents (
           id, organization_id, name, job_title, department, job_function, responsibilities,
           instructions, runtime_id, manager_id, authority_level, can_delegate,
-          model, speed, effort, enabled, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+          model, speed, effort, enabled, tenure, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'permanent', ?, ?)
       `);
       const seedExecutiveSkill = connection.prepare(`
         INSERT OR IGNORE INTO org_agent_skills (org_agent_id, skill_id, created_at) VALUES (?, ?, ?)
+      `);
+      /**
+       * Reseed policy. Identity (id, name, job_title) is written once and never
+       * again. Doctrine text is refreshed from the seed ONLY while the owner has
+       * not edited it, so genuine corrections reach existing databases without
+       * overwriting deliberate changes. Model, speed, effort and runtime are the
+       * owner's choice and are never written by seeding after the first insert.
+       */
+      const refreshDoctrine = connection.prepare(`
+        UPDATE org_agents
+           SET department = ?, job_function = ?, responsibilities = ?, instructions = ?,
+               updated_at = ?
+         WHERE id = ? AND doctrine_edited_at IS NULL
       `);
       for (const executive of BUILTIN_EXECUTIVES) {
         seedExecutive.run(
@@ -869,7 +920,9 @@ export function createDatabase(filename: string): OrchestratorDatabase {
           executive.responsibilities,
           executive.instructions,
           executive.runtimeId,
-          executive.id === 'exec-ceo' ? null : 'exec-ceo',
+          // Not `?? 'exec-ceo'`: the CEO's manager is deliberately null, and `??`
+          // would treat that as absent and make her report to herself.
+          executive.id in EXECUTIVE_MANAGER ? EXECUTIVE_MANAGER[executive.id] : 'exec-ceo',
           executive.authorityLevel,
           executive.canDelegate ? 1 : 0,
           executive.model,
@@ -877,6 +930,14 @@ export function createDatabase(filename: string): OrchestratorDatabase {
           executive.effort,
           now,
           now,
+        );
+        refreshDoctrine.run(
+          executive.department,
+          executive.jobFunction,
+          executive.responsibilities,
+          executive.instructions,
+          now,
+          executive.id,
         );
         for (const skillId of executive.skillIds) {
           seedExecutiveSkill.run(executive.id, skillId, now);
@@ -1126,6 +1187,23 @@ export function createDatabase(filename: string): OrchestratorDatabase {
       const id = randomUUID();
       const managerId = input.managerId ?? null;
       assertManagerAssignment(id, managerId);
+
+      const tenure: Tenure = input.tenure ?? 'hired';
+      const expiryKind = input.expiryKind ?? null;
+      // What makes an agent temporary is a recorded end, not a label. Without one
+      // it is a hire under another name.
+      if (tenure === 'temporary' && expiryKind === null) {
+        throw new Error('Temporary staff require an expiry condition');
+      }
+      if (tenure !== 'temporary' && expiryKind !== null) {
+        throw new Error(`Only temporary staff carry an expiry condition: ${tenure}`);
+      }
+      if (managerId !== null) {
+        const manager = getOrgAgent(managerId);
+        if (!manager) throw new Error(`Organizational agent not found: ${managerId}`);
+        assertTenureOrdering(tenure, manager.tenure);
+      }
+
       const timestamp = new Date().toISOString();
       connection.transaction(() => {
         connection
@@ -1133,8 +1211,9 @@ export function createDatabase(filename: string): OrchestratorDatabase {
             INSERT INTO org_agents (
               id, organization_id, name, job_title, department, job_function, responsibilities,
               instructions, runtime_id, manager_id, authority_level, can_delegate,
-              model, speed, effort, enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+              model, speed, effort, enabled, tenure, expiry_kind, expiry_at,
+              venture_id, department_id, dedication, dedication_reason, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `)
           .run(
             id,
@@ -1152,6 +1231,13 @@ export function createDatabase(filename: string): OrchestratorDatabase {
             input.model ?? null,
             input.speed ?? null,
             input.effort ?? null,
+            tenure,
+            expiryKind,
+            input.expiryAt ?? null,
+            input.ventureId ?? null,
+            input.departmentId ?? null,
+            input.dedication ?? 'shared',
+            input.dedicationReason ?? null,
             timestamp,
             timestamp,
           );
@@ -1445,6 +1531,7 @@ export function createDatabase(filename: string): OrchestratorDatabase {
       };
     },
     identity: createIdentityRepository(connection),
+    org: createOrgRepository(connection),
     close() {
       connection.close();
     },

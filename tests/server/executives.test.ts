@@ -45,10 +45,22 @@ describe('prebuilt executive team', () => {
       organizationId: 'default-org',
     });
     for (const report of directReports) {
-      expect(report.managerId).toBe('exec-ceo');
       expect(report.organizationId).toBe('default-org');
       expect(report.canDelegate).toBe(true);
     }
+
+    // The Chief of Staff is a coordinating layer, not a peer. The Chief
+    // Innovation Officer reports to the CEO because her promotion boundary is
+    // the owner's alone.
+    const managerOf = new Map(agents.map((agent) => [agent.id, agent.managerId]));
+    expect(managerOf.get('exec-chief-of-staff')).toBe('exec-ceo');
+    expect(managerOf.get('exec-cino')).toBe('exec-ceo');
+    expect(managerOf.get('exec-cto')).toBe('exec-chief-of-staff');
+    expect(managerOf.get('exec-cmo')).toBe('exec-chief-of-staff');
+    expect(managerOf.get('exec-cdo')).toBe('exec-chief-of-staff');
+
+    // Every seeded executive is permanent staff.
+    for (const agent of agents) expect(agent.tenure).toBe('permanent');
     expect(agents.map((agent) => agent.jobTitle)).toEqual([
       'Group CEO',
       'Chief of Staff',
