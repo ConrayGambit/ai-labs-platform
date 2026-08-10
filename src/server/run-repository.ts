@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import type { SessionUpdate, StopReason } from '../shared/acp.js';
+import type { PermissionOption, SessionUpdate, StopReason } from '../shared/acp.js';
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'stopped';
 
@@ -71,6 +71,54 @@ export interface FinishRunInput {
   stoppedReason?: string | null;
 }
 
+export type PermissionStatus = 'pending' | 'answered' | 'cancelled';
+
+export interface PermissionRecord {
+  id: string;
+  runId: string;
+  toolCallId: string;
+  title: string;
+  options: PermissionOption[];
+  status: PermissionStatus;
+  selectedOptionId: string | null;
+  answeredByUserId: string | null;
+  createdAt: string;
+  answeredAt: string | null;
+}
+
+interface PermissionRow {
+  id: string;
+  run_id: string;
+  tool_call_id: string;
+  title: string;
+  options_json: string;
+  status: PermissionStatus;
+  selected_option_id: string | null;
+  answered_by_user_id: string | null;
+  created_at: string;
+  answered_at: string | null;
+}
+
+const mapPermission = (row: PermissionRow): PermissionRecord => ({
+  id: row.id,
+  runId: row.run_id,
+  toolCallId: row.tool_call_id,
+  title: row.title,
+  options: JSON.parse(row.options_json) as PermissionOption[],
+  status: row.status,
+  selectedOptionId: row.selected_option_id,
+  answeredByUserId: row.answered_by_user_id,
+  createdAt: row.created_at,
+  answeredAt: row.answered_at,
+});
+
+export interface RecordPermissionInput {
+  runId: string;
+  toolCallId: string;
+  title: string;
+  options: PermissionOption[];
+}
+
 export interface RunRepository {
   createRun(input: CreateRunInput): AgentRun;
   getRun(runId: string): AgentRun | null;
@@ -83,6 +131,14 @@ export interface RunRepository {
   /** Appends one update at the next per-run sequence. */
   appendUpdate(runId: string, update: SessionUpdate): void;
   listUpdates(runId: string): SessionUpdate[];
+  /** Persists a request the agent is now blocked on. Never pre-answered. */
+  recordPermission(input: RecordPermissionInput): PermissionRecord;
+  getPermission(requestId: string): PermissionRecord | null;
+  getPendingPermission(runId: string): PermissionRecord | null;
+  listPermissions(runId: string): PermissionRecord[];
+  answerPermission(input: {
+    requestId: string; optionId: string; userId: string;
+  }): PermissionRecord;
 }
 
 export function createRunRepository(connection: Database.Database): RunRepository {
@@ -97,6 +153,14 @@ export function createRunRepository(connection: Database.Database): RunRepositor
   const nextSequence = connection.prepare(
     'SELECT COALESCE(MAX(sequence) + 1, 0) AS next FROM agent_run_updates WHERE run_id = ?',
   );
+
+  const selectPermission = connection.prepare('SELECT * FROM run_permission_requests WHERE id = ?');
+
+  const requirePermission = (requestId: string): PermissionRecord => {
+    const row = selectPermission.get(requestId) as PermissionRow | undefined;
+    if (!row) throw new Error(`Permission request not found: ${requestId}`);
+    return mapPermission(row);
+  };
 
   return {
     createRun(input) {
@@ -183,6 +247,67 @@ export function createRunRepository(connection: Database.Database): RunRepositor
         .prepare('SELECT payload_json FROM agent_run_updates WHERE run_id = ? ORDER BY sequence')
         .all(runId) as Array<{ payload_json: string }>;
       return rows.map((row) => JSON.parse(row.payload_json) as SessionUpdate);
+    },
+
+    recordPermission(input) {
+      const id = randomUUID();
+      connection.prepare(`
+        INSERT INTO run_permission_requests
+          (id, run_id, tool_call_id, title, options_json, status, created_at)
+        VALUES (@id, @runId, @toolCallId, @title, @optionsJson, 'pending', @createdAt)
+      `).run({
+        id,
+        runId: input.runId,
+        toolCallId: input.toolCallId,
+        title: input.title,
+        optionsJson: JSON.stringify(input.options),
+        createdAt: new Date().toISOString(),
+      });
+      return requirePermission(id);
+    },
+
+    getPermission(requestId) {
+      const row = selectPermission.get(requestId) as PermissionRow | undefined;
+      return row ? mapPermission(row) : null;
+    },
+
+    getPendingPermission(runId) {
+      const row = connection
+        .prepare(
+          "SELECT * FROM run_permission_requests WHERE run_id = ? AND status = 'pending' ORDER BY created_at LIMIT 1",
+        )
+        .get(runId) as PermissionRow | undefined;
+      return row ? mapPermission(row) : null;
+    },
+
+    listPermissions(runId) {
+      const rows = connection
+        .prepare('SELECT * FROM run_permission_requests WHERE run_id = ? ORDER BY created_at')
+        .all(runId) as PermissionRow[];
+      return rows.map(mapPermission);
+    },
+
+    answerPermission(input) {
+      return connection.transaction(() => {
+        const existing = requirePermission(input.requestId);
+        if (existing.status !== 'pending') {
+          throw new Error(`Permission request has already been ${existing.status}`);
+        }
+        if (!existing.options.some((option) => option.optionId === input.optionId)) {
+          // Answering with an option the agent did not offer is a protocol
+          // error dressed as a decision.
+          throw new Error(`Option was not offered by the agent: ${input.optionId}`);
+        }
+        connection.prepare(`
+          UPDATE run_permission_requests SET
+            status = 'answered',
+            selected_option_id = @optionId,
+            answered_by_user_id = @userId,
+            answered_at = @answeredAt
+          WHERE id = @requestId
+        `).run({ ...input, answeredAt: new Date().toISOString() });
+        return requirePermission(input.requestId);
+      })();
     },
   };
 }

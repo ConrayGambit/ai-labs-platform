@@ -1,12 +1,18 @@
-import { readUsage, type SessionUpdate, type StopReason } from '../shared/acp.js';
+import {
+  readUsage,
+  type PermissionRequest,
+  type PermissionResponse,
+  type SessionUpdate,
+  type StopReason,
+} from '../shared/acp.js';
 import type { OrgAgent, Skill } from '../shared/domain.js';
 import { createAcpClient, type AcpClient, type AcpClientOptions, type PermissionHandler } from './acp/client.js';
 import type { OrchestratorDatabase } from './database.js';
 import { getLadder } from './gate-policy.js';
 import { buildPrompt } from './run-prompt.js';
-import type { AgentRun, RunStatus } from './run-repository.js';
+import type { AgentRun, PermissionRecord, RunStatus } from './run-repository.js';
 
-export type { AgentRun, RunStatus } from './run-repository.js';
+export type { AgentRun, PermissionRecord, RunStatus } from './run-repository.js';
 
 export interface StartRunInput {
   cardId: string;
@@ -16,11 +22,30 @@ export interface StartRunInput {
   parentRunId?: string | null;
 }
 
-export type UpdateListener = (update: SessionUpdate) => void;
+/**
+ * What a watcher of a run sees.
+ *
+ * Wider than an ACP update because a client needs to know more than what the
+ * agent said: that the run is blocked on a person, that somebody answered, and
+ * how the run ended. The ACP stream stays pure — `update` carries it verbatim.
+ */
+export type RunEvent =
+  | { type: 'update'; update: SessionUpdate }
+  | { type: 'permission_request'; request: PermissionRecord }
+  | { type: 'permission_answered'; request: PermissionRecord }
+  | { type: 'finished'; run: AgentRun };
+
+export type RunEventListener = (event: RunEvent) => void;
 
 export interface Subscription {
   runId: string;
-  listener: UpdateListener;
+  listener: RunEventListener;
+}
+
+export interface AnswerPermissionInput {
+  requestId: string;
+  optionId: string;
+  userId: string;
 }
 
 export interface RunSupervisorDependencies {
@@ -40,8 +65,17 @@ export interface RunSupervisor {
    * Replays everything already recorded, in order, then streams live. A client
    * that arrives late or reconnects misses nothing.
    */
-  subscribe(runId: string, listener: UpdateListener): Subscription;
+  subscribe(runId: string, listener: RunEventListener): Subscription;
   unsubscribe(subscription: Subscription): void;
+  /** The request the agent is blocked on, if it is blocked on one. */
+  getPendingPermission(runId: string): PermissionRecord | null;
+  listPermissions(runId: string): PermissionRecord[];
+  isAwaitingPermission(runId: string): boolean;
+  /**
+   * Answers on behalf of a person, who must have access to the card's venture.
+   * A refused answer leaves the request pending for someone who may answer.
+   */
+  answerPermission(input: AnswerPermissionInput): Promise<PermissionRecord>;
   cancelRun(runId: string): Promise<void>;
   /** Resolves once the turn has finished and the run row is final. */
   waitForRun(runId: string): Promise<AgentRun>;
@@ -60,7 +94,7 @@ function statusForStopReason(stopReason: StopReason): RunStatus {
 interface ActiveRun {
   client: AcpClient;
   sessionId: string | null;
-  listeners: Set<UpdateListener>;
+  listeners: Set<RunEventListener>;
   finished: Promise<AgentRun>;
   /** Set when the platform itself decides to end the run, so the reason survives. */
   stoppedReason: string | null;
@@ -70,6 +104,11 @@ interface ActiveRun {
    * does nothing is worse than one that is slow.
    */
   cancelRequested: boolean;
+  /**
+   * Resolvers for permission requests the agent is blocked on, keyed by our own
+   * request id. The agent's JSON-RPC request stays open until one is called.
+   */
+  awaiting: Map<string, (response: PermissionResponse) => void>;
 }
 
 export function createRunSupervisor(dependencies: RunSupervisorDependencies): RunSupervisor {
@@ -89,9 +128,13 @@ export function createRunSupervisor(dependencies: RunSupervisorDependencies): Ru
    * Storing before fanning out is what makes replay exact — a subscriber can
    * never see an update that is not yet in the record it would replay from.
    */
+  const emit = (entry: ActiveRun, event: RunEvent): void => {
+    for (const listener of entry.listeners) listener(event);
+  };
+
   const handleUpdate = (run: AgentRun, entry: ActiveRun, update: SessionUpdate): void => {
     runs.appendUpdate(run.id, update);
-    for (const listener of entry.listeners) listener(update);
+    emit(entry, { type: 'update', update });
 
     if (update.sessionUpdate === 'agent_message_chunk' && run.roomId) {
       database.rooms.postMessage({
@@ -147,10 +190,28 @@ export function createRunSupervisor(dependencies: RunSupervisorDependencies): Ru
         finished: Promise.resolve(run),
         stoppedReason: null,
         cancelRequested: false,
+        awaiting: new Map(),
       };
       active.set(run.id, entry);
 
-      if (permissionHandler) client.onPermissionRequest(permissionHandler);
+      /**
+       * The agent's request is persisted and then held open. Nothing here has a
+       * default answer: an unanswered request blocks the tool call rather than
+       * letting it run because nobody was watching.
+       */
+      client.onPermissionRequest(async (request: PermissionRequest) => {
+        if (permissionHandler) return await permissionHandler(request);
+        const record = runs.recordPermission({
+          runId: run.id,
+          toolCallId: request.toolCall.toolCallId,
+          title: request.toolCall.title ?? '',
+          options: request.options,
+        });
+        emit(entry, { type: 'permission_request', request: record });
+        return await new Promise<PermissionResponse>((answer) => {
+          entry.awaiting.set(record.id, answer);
+        });
+      });
       client.onSessionUpdate((notification) => {
         try {
           handleUpdate(run, entry, notification.update);
@@ -213,6 +274,9 @@ export function createRunSupervisor(dependencies: RunSupervisorDependencies): Ru
           });
         } finally {
           await client.close();
+          // Tell watchers how it ended before the entry goes, or a client that
+          // was streaming sees the stream simply stop.
+          emit(entry, { type: 'finished', run: runs.getRun(run.id) ?? run });
           active.delete(run.id);
         }
         return runs.getRun(run.id) ?? run;
@@ -228,9 +292,42 @@ export function createRunSupervisor(dependencies: RunSupervisorDependencies): Ru
     subscribe(runId, listener) {
       // Replay first, then attach. Attaching first would deliver a live update
       // ahead of its predecessors, which is worse than delivering it late.
-      for (const update of runs.listUpdates(runId)) listener(update);
+      for (const update of runs.listUpdates(runId)) listener({ type: 'update', update });
+      const pending = runs.getPendingPermission(runId);
+      // A client that connects while the agent is blocked has to be told, or
+      // the run looks stalled and the person who could unblock it never knows.
+      if (pending) listener({ type: 'permission_request', request: pending });
       active.get(runId)?.listeners.add(listener);
       return { runId, listener };
+    },
+
+    getPendingPermission: (runId) => runs.getPendingPermission(runId),
+    listPermissions: (runId) => runs.listPermissions(runId),
+    isAwaitingPermission: (runId) => runs.getPendingPermission(runId) !== null,
+
+    async answerPermission(input) {
+      const record = runs.getPermission(input.requestId);
+      if (!record) throw new Error(`Permission request not found: ${input.requestId}`);
+      const run = runs.getRun(record.runId);
+      if (!run) throw new Error(`Run not found: ${record.runId}`);
+      const card = database.work.getCard(run.cardId);
+      if (!card) throw new Error(`Card not found: ${run.cardId}`);
+      const project = database.platform.getProject(card.projectId);
+      if (!project) throw new Error(`Project not found: ${card.projectId}`);
+
+      // Access is checked BEFORE the request is marked answered, so a refused
+      // answer leaves it pending for somebody who may actually answer it.
+      database.identity.assertVentureAccess(input.userId, project.ventureId);
+
+      const answered = runs.answerPermission(input);
+      const entry = active.get(record.runId);
+      const resolve = entry?.awaiting.get(record.id);
+      if (entry && resolve) {
+        entry.awaiting.delete(record.id);
+        resolve({ outcome: { outcome: 'selected', optionId: input.optionId } });
+        emit(entry, { type: 'permission_answered', request: answered });
+      }
+      return answered;
     },
 
     unsubscribe(subscription) {

@@ -574,4 +574,28 @@ export const MIGRATIONS: Migration[] = [
         );
       `,
   },
+  {
+    id: '0012-permissions',
+    // A permission request is durable, because the agent is blocked on it and
+    // the answer belongs to a person. Nothing here has a default answer: an
+    // unanswered request stays pending across a restart rather than being
+    // treated as consent by a client that went away.
+    sql: `
+        CREATE TABLE IF NOT EXISTS run_permission_requests (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+          tool_call_id TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT '',
+          options_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','answered','cancelled')),
+          selected_option_id TEXT,
+          answered_by_user_id TEXT REFERENCES users(id),
+          created_at TEXT NOT NULL,
+          answered_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS run_permission_requests_run
+          ON run_permission_requests(run_id, status);
+      `,
+  },
 ];
