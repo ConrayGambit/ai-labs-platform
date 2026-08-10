@@ -407,4 +407,57 @@ export const MIGRATIONS: Migration[] = [
         ALTER TABLE platform_idempotency_keys ADD COLUMN owner_user_id TEXT;
       `,
   },
+  {
+    id: '0008-cards',
+    // The board agents actually work off. Cards hang off the merged project, not
+    // the legacy `projects` table.
+    //
+    // `owner_notes` lives on the card rather than in a general text field so the
+    // one column agents must never write is a column, not a convention.
+    sql: `
+        CREATE TABLE IF NOT EXISTS cards (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES platform_projects(id) ON DELETE CASCADE,
+          parent_card_id TEXT REFERENCES cards(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'backlog'
+            CHECK(status IN ('backlog','ready','in_progress','review','blocked','done')),
+          priority TEXT NOT NULL DEFAULT 'medium'
+            CHECK(priority IN ('urgent','high','medium','low')),
+          assignee_org_agent_id TEXT REFERENCES org_agents(id) ON DELETE SET NULL,
+          owner_notes TEXT NOT NULL DEFAULT '',
+          position INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK(parent_card_id IS NULL OR parent_card_id <> id)
+        );
+        CREATE INDEX IF NOT EXISTS cards_board ON cards(project_id, status, position);
+
+        CREATE TABLE IF NOT EXISTS card_activity (
+          id TEXT PRIMARY KEY,
+          card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          actor_type TEXT NOT NULL CHECK(actor_type IN ('user','org_agent','system')),
+          actor_id TEXT,
+          kind TEXT NOT NULL
+            CHECK(kind IN ('created','moved','assigned','notes_changed','artifact_attached','commented')),
+          detail TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          sequence INTEGER NOT NULL,
+          CHECK(NOT (actor_type = 'org_agent' AND kind = 'notes_changed'))
+        );
+        CREATE INDEX IF NOT EXISTS card_activity_card ON card_activity(card_id, sequence);
+
+        CREATE TABLE IF NOT EXISTS card_artifacts (
+          id TEXT PRIMARY KEY,
+          card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          run_id TEXT,
+          kind TEXT NOT NULL CHECK(kind IN ('file','diff','link','report')),
+          label TEXT NOT NULL,
+          location TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS card_artifacts_card ON card_artifacts(card_id, created_at);
+      `,
+  },
 ];
