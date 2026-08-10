@@ -26,6 +26,7 @@ type ProjectRow = {
   supervision_policy: WorkProject['supervisionPolicy']; workspace_mode: WorkProject['workspaceMode'];
   repository_path: string | null;
   gate_ladder_id: string | null;
+  reviewer_count_override: number | null;
   created_at: string; updated_at: string;
 };
 type ApprovalRow = {
@@ -89,6 +90,7 @@ const mapProject = (row: ProjectRow): WorkProject => ({
   lifecycle: row.lifecycle, supervisionPolicy: row.supervision_policy, workspaceMode: row.workspace_mode,
   repositoryPath: row.repository_path ?? null,
   gateLadderId: row.gate_ladder_id ?? 'product',
+  reviewerCountOverride: row.reviewer_count_override ?? null,
   createdAt: row.created_at, updatedAt: row.updated_at,
 });
 const mapApproval = (row: ApprovalRow): ApprovalRequest => ({
@@ -168,17 +170,18 @@ export function createPlatformRepository(connection: Database.Database): Platfor
       successCriteria: input.successCriteria, constraints: input.constraints ?? [], zeroFirst: true,
       lifecycle: 'draft', supervisionPolicy: 'project_defined', workspaceMode: 'configurable',
       repositoryPath: input.repositoryPath ?? null, gateLadderId: input.gateLadderId ?? 'product',
+      reviewerCountOverride: input.reviewerCountOverride ?? null,
       createdAt: now, updatedAt: now,
     };
     connection.prepare(`
       INSERT INTO platform_projects (
         id, venture_id, name, objective, success_criteria_json, constraints_json,
         zero_first, lifecycle, supervision_policy, workspace_mode, repository_path,
-        gate_ladder_id, created_at, updated_at
+        gate_ladder_id, reviewer_count_override, created_at, updated_at
       ) VALUES (
         @id, @ventureId, @name, @objective, @successCriteriaJson, @constraintsJson,
         @zeroFirst, @lifecycle, @supervisionPolicy, @workspaceMode, @repositoryPath,
-        @gateLadderId, @createdAt, @updatedAt
+        @gateLadderId, @reviewerCountOverride, @createdAt, @updatedAt
       )
     `).run({ ...project, successCriteriaJson: JSON.stringify(project.successCriteria),
       constraintsJson: JSON.stringify(project.constraints), zeroFirst: 1 });

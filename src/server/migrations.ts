@@ -661,4 +661,14 @@ export const MIGRATIONS: Migration[] = [
           ON review_findings(review_id, priority);
       `,
   },
+  {
+    id: '0015-review-deadline',
+    // A deadline is what stops one silent reviewer sealing a gate forever.
+    // Nullable, and null means no deadline rather than an expired one: a
+    // missing deadline read as passed would quietly disable blindness on every
+    // gate nobody got round to scheduling.
+    sql: `
+        ALTER TABLE review_assignments ADD COLUMN review_deadline_at TEXT;
+      `,
+  },
 ];

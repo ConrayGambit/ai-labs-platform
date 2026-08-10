@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
   canReview,
+  reviewIsVisibleTo,
   type AssignRoleInput,
   type ChecklistAnswer,
   type FileReviewInput,
@@ -10,8 +11,10 @@ import {
   type Review,
   type ReviewAssignment,
   type ReviewerIdentity,
+  type ReviewViewerRole,
 } from '../shared/governance.js';
-import type { GateId } from '../shared/work.js';
+import { effectiveReviewerCount, type GateId } from '../shared/work.js';
+import { getLadder } from './gate-policy.js';
 
 interface AssignmentRow {
   id: string;
@@ -65,6 +68,21 @@ export interface GovernanceRepository {
    * discipline defeated by a refresh button.
    */
   listCurrentReviews(cardId: string, gateId: GateId): Review[];
+  /**
+   * The reviews this viewer is allowed to read right now.
+   *
+   * Filters rather than throws: a viewer asking to see reviews should get the
+   * ones they may see, not an error telling them others exist.
+   */
+  listVisibleReviews(
+    cardId: string,
+    gateId: GateId,
+    viewer: { id: string; role: ReviewViewerRole },
+  ): Review[];
+  /** Sets when an outstanding reviewer stops being able to seal the gate. */
+  setReviewDeadline(input: {
+    cardId: string; gateId: GateId; orgAgentId: string; deadlineAt: string | null;
+  }): void;
 }
 
 interface ReviewRow {
@@ -192,6 +210,40 @@ export function createGovernanceRepository(connection: Database.Database): Gover
     (connection
       .prepare('SELECT * FROM review_findings WHERE review_id = ? ORDER BY priority, created_at')
       .all(reviewId) as FindingRow[]).map(mapFinding);
+
+  const listCurrentReviews = (cardId: string, gateId: GateId): Review[] =>
+    (connection
+      .prepare(
+        `SELECT * FROM reviews
+          WHERE card_id = ? AND gate_id = ? AND superseded_by_review_id IS NULL
+          ORDER BY filed_at, id`,
+      )
+      .all(cardId, gateId) as ReviewRow[])
+      .map((row) => mapReview(row, findingsFor(row.id)));
+
+  /**
+   * The effective reviewer count for a gate: card override, then project
+   * override, then the ladder's default (spec 20.2.1). Resolved here so the
+   * visibility rule and the advancement rule can never disagree about how many
+   * reviews this gate wants.
+   */
+  const requiredReviewersFor = (cardId: string, gateId: GateId): number => {
+    const card = connection
+      .prepare('SELECT project_id, reviewer_count_override FROM cards WHERE id = ?')
+      .get(cardId) as { project_id: string; reviewer_count_override: number | null } | undefined;
+    if (!card) throw new Error(`Card not found: ${cardId}`);
+    const project = connection
+      .prepare('SELECT gate_ladder_id, reviewer_count_override FROM platform_projects WHERE id = ?')
+      .get(card.project_id) as
+        { gate_ladder_id: string | null; reviewer_count_override: number | null } | undefined;
+    const gate = getLadder(project?.gate_ladder_id ?? 'product').gates
+      .find((candidate) => candidate.id === gateId);
+    if (!gate) throw new Error(`Gate ${gateId} is not on this project's ladder`);
+    return effectiveReviewerCount(gate, {
+      card: card.reviewer_count_override,
+      project: project?.reviewer_count_override ?? null,
+    });
+  };
 
   const requireReview = (reviewId: string): Review => {
     const row = selectReview.get(reviewId) as ReviewRow | undefined;
@@ -358,14 +410,46 @@ export function createGovernanceRepository(connection: Database.Database): Gover
         .all(cardId, gateId) as ReviewRow[])
         .map((row) => mapReview(row, findingsFor(row.id))),
 
-    listCurrentReviews: (cardId, gateId) =>
-      (connection
+    listVisibleReviews(cardId, gateId, viewer) {
+      const current = listCurrentReviews(cardId, gateId);
+      const required = requiredReviewersFor(cardId, gateId);
+      // Distinct reviewers whose review currently stands. Counting rows instead
+      // would let one reviewer unseal the gate by filing twice.
+      const filedReviewerIds = [...new Set(current.map((review) => review.reviewerOrgAgentId))];
+      const filedIds = new Set(filedReviewerIds);
+      const outstanding = connection
         .prepare(
-          `SELECT * FROM reviews
-            WHERE card_id = ? AND gate_id = ? AND superseded_by_review_id IS NULL
-            ORDER BY filed_at, id`,
+          `SELECT MIN(review_deadline_at) AS deadline FROM review_assignments
+            WHERE card_id = ? AND gate_id = ? AND role = 'reviewer'
+              AND review_deadline_at IS NOT NULL`,
         )
-        .all(cardId, gateId) as ReviewRow[])
-        .map((row) => mapReview(row, findingsFor(row.id))),
+        .get(cardId, gateId) as { deadline: string | null };
+      // Only a reviewer who has NOT filed can be the one holding the gate shut.
+      const stillOut = listReviewers(cardId, gateId)
+        .filter((assignment) => !filedIds.has(assignment.orgAgentId));
+      const deadlineAt = stillOut.length === 0 ? null : outstanding.deadline;
+      const now = new Date().toISOString();
+
+      return current.filter((review) => reviewIsVisibleTo({
+        requiredReviewers: required,
+        filedReviewerIds,
+        reviewAuthorId: review.reviewerOrgAgentId,
+        viewerId: viewer.id,
+        viewerRole: viewer.role,
+        now,
+        deadlineAt,
+      }));
+    },
+
+    setReviewDeadline(input) {
+      connection
+        .prepare(
+          `UPDATE review_assignments SET review_deadline_at = ?
+            WHERE card_id = ? AND gate_id = ? AND org_agent_id = ?`,
+        )
+        .run(input.deadlineAt, input.cardId, input.gateId, input.orgAgentId);
+    },
+
+    listCurrentReviews,
   };
 }

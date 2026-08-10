@@ -51,6 +51,8 @@ export interface WorkProject {
   repositoryPath: string | null;
   /** Which gate ladder this project's board is built from. */
   gateLadderId: string;
+  /** A deliberate raise in reviewers for all this project's work, or null. */
+  reviewerCountOverride: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -109,6 +111,7 @@ export interface CreateWorkProjectInput {
   constraints?: string[];
   repositoryPath?: string | null;
   gateLadderId?: string;
+  reviewerCountOverride?: number | null;
 }
 
 export interface ExecutiveSnapshot {

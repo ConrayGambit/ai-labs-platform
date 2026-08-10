@@ -26,6 +26,48 @@ export interface AssignRoleInput {
   orgAgentId: string;
 }
 
+/** Who is looking. The owner is not a gate participant and sees everything. */
+export type ReviewViewerRole = GovernanceRole | 'owner';
+
+export interface ReviewVisibilityInput {
+  /** The effective reviewer count for this gate, most-specific override applied. */
+  requiredReviewers: number;
+  /** Distinct reviewers whose review currently stands. Superseded ones do not count. */
+  filedReviewerIds: readonly string[];
+  reviewAuthorId: string;
+  viewerId: string;
+  viewerRole: ReviewViewerRole;
+  now: string;
+  /** The earliest outstanding reviewer's deadline, or null if none is set. */
+  deadlineAt: string | null;
+}
+
+/**
+ * Whether a filed review may be read yet.
+ *
+ * Two reviewers who read each other converge, and manufactured convergence is
+ * worth nothing — it looks like corroboration and is actually one opinion
+ * counted twice. So a review stays sealed until every required review is in, or
+ * the outstanding reviewer's deadline passes.
+ *
+ * The builder is sealed out too, because 20.4.1 requires it to read *both*
+ * reviews before ruling on either; seeing one early is how a builder starts
+ * adjudicating against a case it has not finished hearing.
+ *
+ * At one reviewer this does not engage: there is nobody to be blind from, and
+ * the platform does not pretend otherwise (spec 20.3).
+ */
+export function reviewIsVisibleTo(input: ReviewVisibilityInput): boolean {
+  if (input.viewerRole === 'owner') return true;
+  if (input.requiredReviewers < 2) return true;
+  if (input.viewerId === input.reviewAuthorId) return true;
+  if (input.filedReviewerIds.length >= input.requiredReviewers) return true;
+  // No deadline is not an expired deadline. Treating a missing one as passed
+  // would quietly disable blindness on every gate nobody scheduled.
+  if (input.deadlineAt !== null && input.now > input.deadlineAt) return true;
+  return false;
+}
+
 export type FindingPriority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
 
 export interface Finding {
