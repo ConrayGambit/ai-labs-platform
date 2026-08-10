@@ -4,6 +4,9 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { z, ZodError } from 'zod';
 import { RUNTIME_OPTION_KEYS, SKILL_CATEGORIES, TASK_STATUSES } from '../shared/domain.js';
 import { createCouncilOrchestrator, type AgentInvoker } from './council.js';
+import { registerRealtime } from './realtime.js';
+import type { RunSupervisor } from './run-supervisor.js';
+import websocket from '@fastify/websocket';
 import type { OrchestratorDatabase } from './database.js';
 import { createHierarchyOrchestrator } from './hierarchy.js';
 import { registerPlatformApi, type ExportFailureLogger } from './platform-api.js';
@@ -21,6 +24,11 @@ export interface AppDependencies {
   exportEvent?: (event: PlatformEvent) => Promise<unknown>;
   logExportFailure?: ExportFailureLogger;
   exportDrainTimeoutMs?: number;
+  /**
+   * Registers the realtime socket when supplied. Optional so a test that only
+   * exercises HTTP does not have to stand up a run supervisor and a provider.
+   */
+  supervisor?: RunSupervisor;
 }
 
 const projectSchema = z.object({
@@ -137,6 +145,7 @@ export function buildApp({
   exportEvent,
   logExportFailure,
   exportDrainTimeoutMs,
+  supervisor,
 }: AppDependencies): FastifyInstance {
   const app = Fastify({ logger: false });
   const council = createCouncilOrchestrator({ database, invoke });
@@ -361,6 +370,13 @@ export function buildApp({
     if (!run) throw new Error(`Run not found: ${request.params.runId}`);
     return { run, messages: database.listRunMessages(run.id) };
   });
+
+  if (supervisor) {
+    // Registered last so the plugin is in place before the route it serves.
+    void app.register(websocket).then(() => {
+      registerRealtime(app, { database, supervisor, currentUserId });
+    });
+  }
 
   return app;
 }

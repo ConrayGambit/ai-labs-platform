@@ -50,6 +50,11 @@ export interface AnswerPermissionInput {
 
 export interface RunSupervisorDependencies {
   database: OrchestratorDatabase;
+  /**
+   * Where a session with no project repository runs. Defaults to the process's
+   * own directory, which is only correct for a project that has no checkout.
+   */
+  fallbackCwd?: string;
   /** How to launch this agent's provider. Injected so tests need no provider. */
   spawnFor: (agent: OrgAgent) => AcpClientOptions;
   /** Answers `session/request_permission`. Absent means deny, per the client. */
@@ -113,6 +118,7 @@ interface ActiveRun {
 
 export function createRunSupervisor(dependencies: RunSupervisorDependencies): RunSupervisor {
   const { database, spawnFor, permissionHandler } = dependencies;
+  const fallbackCwd = dependencies.fallbackCwd ?? process.cwd();
   const runs = database.runs;
   const active = new Map<string, ActiveRun>();
 
@@ -227,7 +233,14 @@ export function createRunSupervisor(dependencies: RunSupervisorDependencies): Ru
       entry.finished = (async (): Promise<AgentRun> => {
         try {
           await client.initialize();
-          const session = await client.newSession({ cwd: process.cwd(), mcpServers: [] });
+          // The agent works in the project's own checkout. Running it in the
+          // server's directory would point every agent at this repository,
+          // which is the one place none of them should be editing.
+          const project = database.platform.getProject(card.projectId);
+          const session = await client.newSession({
+            cwd: project?.repositoryPath ?? fallbackCwd,
+            mcpServers: [],
+          });
           entry.sessionId = session.sessionId;
           runs.setSessionId(run.id, session.sessionId);
           // Honour a cancel that arrived while the provider was still starting.
@@ -256,8 +269,8 @@ export function createRunSupervisor(dependencies: RunSupervisorDependencies): Ru
             runs.finishRun({ runId: run.id, status, stopReason: result.stopReason });
             if (status === 'completed') {
               // A finished turn puts the work up for review at the first gate.
-              const project = database.platform.getProject(card.projectId);
-              const firstGate = getLadder(project?.gateLadderId ?? 'product').gates[0];
+              const ladderProject = database.platform.getProject(card.projectId);
+              const firstGate = getLadder(ladderProject?.gateLadderId ?? 'product').gates[0];
               if (firstGate) {
                 database.work.moveCard({
                   cardId: card.id, to: firstGate.id, position: 0, userId: 'system',

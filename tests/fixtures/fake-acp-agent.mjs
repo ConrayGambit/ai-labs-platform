@@ -14,6 +14,8 @@ let cancelled = false;
 /** The prompt request we are mid-turn on, so a permission answer can finish it. */
 let pendingPromptId = null;
 let pendingSessionId = null;
+/** The working directory the client asked for, so a test can assert on it. */
+let sessionCwd = null;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -49,6 +51,7 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
   }
 
   if (message.method === 'session/new') {
+    sessionCwd = message.params?.cwd ?? null;
     reply(message.id, { sessionId: script.sessionId ?? 'sess_test_1' });
     return;
   }
@@ -68,6 +71,15 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     const { sessionId } = message.params;
     pendingPromptId = message.id;
     pendingSessionId = sessionId;
+    if (script.echoCwd) {
+      notify('session/update', {
+        sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: `cwd:${sessionCwd}` },
+        },
+      });
+    }
     if (script.echoPrompt) {
       notify('session/update', {
         sessionId,

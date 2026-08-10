@@ -7,6 +7,8 @@ import { runAgentProcess } from './agent-process.js';
 import type { AgentInvoker } from './council.js';
 import { createDatabase } from './database.js';
 import { createObsidianExporter } from './obsidian-exporter.js';
+import { createRunSupervisor } from './run-supervisor.js';
+import { resolveRuntimeEnv } from './agent-process.js';
 import { resolveAiLabsPaths } from './paths.js';
 import { startTenureSweep } from './tenure-sweep.js';
 
@@ -49,10 +51,35 @@ const obsidianExporter = obsidianVaultPath
   ? createObsidianExporter({ vaultPath: obsidianVaultPath })
   : null;
 const currentUserId = process.env.AI_LABS_OWNER_USER_ID ?? 'owner';
+
+/**
+ * How a run launches an agent's provider.
+ *
+ * The runtime's own command and arguments are used verbatim, and its `${VAR}`
+ * environment references resolve at launch through the same helper every other
+ * runtime launch uses. AI Labs never holds a model credential: the provider's
+ * own CLI does, and the value is read from the environment at the moment of
+ * spawn rather than stored anywhere here.
+ */
+const supervisor = createRunSupervisor({
+  database,
+  spawnFor: (agent) => {
+    const runtime = database.getAgent(agent.runtimeId);
+    if (!runtime) throw new Error(`Runtime not found for agent ${agent.id}: ${agent.runtimeId}`);
+    return {
+      command: runtime.command,
+      args: runtime.argsTemplate,
+      cwd: process.cwd(),
+      env: resolveRuntimeEnv(runtime.env ?? {}),
+    };
+  },
+});
+
 const app = buildApp({
   database,
   invoke,
   currentUserId,
+  supervisor,
   exportEvent: obsidianExporter ? (event) => obsidianExporter.exportEvent(event) : undefined,
 });
 const webRoot = resolve('./dist/web');

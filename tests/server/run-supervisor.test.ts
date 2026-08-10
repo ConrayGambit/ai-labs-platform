@@ -285,6 +285,62 @@ describe('the run supervisor', () => {
     expect(blocks[2]!.text).toBe('Begin.');
   });
 
+  it('runs the session in the project checkout, not the server directory', async () => {
+    database = createDatabase(':memory:');
+    const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
+    const venture = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'Research Lab', kind: 'research', mission: 'Evaluate tools.',
+    });
+    const withCheckout = database.platform.createProject({
+      ventureId: venture.id,
+      name: 'Has a checkout',
+      objective: 'Build the thing.',
+      successCriteria: ['It builds'],
+      repositoryPath: '/workspaces/example-product',
+    });
+    const withoutCheckout = database.platform.createProject({
+      ventureId: venture.id,
+      name: 'Has no checkout',
+      objective: 'Write the thing.',
+      successCriteria: ['It reads well'],
+    });
+    const runtime = database.createAgent({
+      name: 'Test ACP Runtime', command: 'node', argsTemplate: ['{prompt}'],
+      promptTransport: 'argument', outputFormat: 'text',
+      versionArgs: ['--version'], timeoutMs: 120_000,
+    });
+    const agent = database.createOrgAgent({
+      name: 'Test Specialist', jobTitle: 'Research Specialist', department: 'Research',
+      jobFunction: 'Compares services.', responsibilities: 'Survey.', runtimeId: runtime.id,
+    });
+    supervisor = createRunSupervisor({
+      database,
+      fallbackCwd: '/fallback',
+      spawnFor: () => ({
+        command: process.execPath,
+        args: [FAKE_AGENT],
+        cwd: process.cwd(),
+        env: { FAKE_ACP_SCRIPT: JSON.stringify({ echoCwd: true }) },
+      }),
+    });
+
+    const reportedCwd = async (projectId: string): Promise<string> => {
+      const card = database!.work.createCard({ projectId, title: 'Do the work' });
+      const run = await supervisor!.startRun({
+        cardId: card.id, orgAgentId: agent.id, message: 'Begin.',
+      });
+      await supervisor!.waitForRun(run.id);
+      const first = supervisor!.listUpdates(run.id)[0] as { content: { text: string } };
+      return first.content.text.replace(/^cwd:/, '');
+    };
+
+    // The agent works in the project's own checkout. Running it in the server's
+    // directory would point every agent at this repository, which is the one
+    // place none of them should be editing.
+    expect(await reportedCwd(withCheckout.id)).toBe('/workspaces/example-product');
+    expect(await reportedCwd(withoutCheckout.id)).toBe('/fallback');
+  });
+
   it('builds the same three tiers when called directly', () => {
     const { card, agent } = seed();
     const blocks = buildPrompt({
