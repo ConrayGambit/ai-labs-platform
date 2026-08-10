@@ -12,11 +12,11 @@ jobs:
   verify:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -35,11 +35,25 @@ jobs:
       - name: Publishable-data guard (full history)
         run: npm run guard:history
 
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # Separate job, and deliberately not on windows-latest. gitleaks-action asks
+  # for gitleaks_<version>_windows_x64.tar.gz, but gitleaks publishes .zip for
+  # Windows and .tar.gz only for Linux, so the download 404s on every Windows
+  # run. That failed before the scan ran at all, which is the worst way for a
+  # secret scan to fail: red for a reason that has nothing to do with secrets,
+  # and eventually ignored. Scanning reads git history, so the platform it runs
+  # on is arbitrary.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - name: Secret scan (full history)
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
