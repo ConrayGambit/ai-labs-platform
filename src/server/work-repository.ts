@@ -330,6 +330,21 @@ export function createWorkRepository(connection: Database.Database): WorkReposit
          * path reached the same state — so the narrowest shared point gets the
          * check too.
          */
+        /*
+         * The same rule at the single write. Policy is what a caller consults;
+         * this is what holds when a caller forgets — and holding the two in
+         * step is why they are written together rather than one now and one
+         * when a route needs it.
+         */
+        const openP0 = connection
+          .prepare("SELECT 1 FROM p0_escalations WHERE card_id = ? AND status = 'open' LIMIT 1")
+          .get(input.cardId);
+        if (openP0 && input.to !== 'blocked') {
+          throw new Error(
+            'An unresolved P0 stands against this card; only the owner can clear it',
+          );
+        }
+
         if (input.to === 'done') {
           const stored = connection
             .prepare('SELECT points_json FROM card_handovers WHERE card_id = ?')

@@ -167,6 +167,14 @@ export interface AdvanceEvidence {
   missingSpecificationSections: readonly string[];
   /** Handover points still unwritten. Empty means complete. Required, as above. */
   missingHandoverPoints: readonly string[];
+  /**
+   * Whether an unresolved P0 stands against this card.
+   *
+   * A P0 "stops the affected work" (spec 20.4.5), and stopped means stopped:
+   * not merely unable to close, but unable to be walked back into progress
+   * while it is open. Required, as above.
+   */
+  hasOpenP0: boolean;
 }
 
 /**

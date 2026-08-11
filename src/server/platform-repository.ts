@@ -14,6 +14,7 @@ import {
 } from '../shared/platform.js';
 import { createPlatformExportOutbox, type PlatformExportJob } from './platform-export-outbox.js';
 import { createDefaultPortfolioRepository } from './platform-default-portfolio.js';
+import { getLadder } from './gate-policy.js';
 
 type PortfolioRow = { id: string; name: string; owner_user_id: string; created_at: string; updated_at: string };
 type VentureRow = {
@@ -164,6 +165,24 @@ export function createPlatformRepository(connection: Database.Database): Platfor
   const createProject = connection.transaction((input: CreateWorkProjectInput): WorkProject => {
     const venture = getVenture(input.ventureId);
     if (!venture) throw new Error(`Venture not found: ${input.ventureId}`);
+    /*
+     * A raise may never lower, checked at the write — the same rule the card
+     * path enforces in work-repository, and for the same reason. Validating
+     * only on read stores the bad number and then throws on every board read
+     * for every card in the project, turning a rejected input into an outage.
+     * The card path was fixed in review; this one was missed because it is a
+     * different file.
+     */
+    if (input.reviewerCountOverride !== undefined && input.reviewerCountOverride !== null) {
+      const strictest = getLadder(input.gateLadderId ?? 'product').gates
+        .reduce((most, gate) => Math.max(most, gate.reviewerCount), 0);
+      if (input.reviewerCountOverride < strictest) {
+        throw new Error(
+          `Reviewer count may be raised but not lowered: this ladder requires at least ` +
+            `${strictest}, got ${input.reviewerCountOverride}`,
+        );
+      }
+    }
     const now = new Date().toISOString();
     const project: WorkProject = {
       id: randomUUID(), ventureId: input.ventureId, name: input.name, objective: input.objective,

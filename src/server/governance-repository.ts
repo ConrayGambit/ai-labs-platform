@@ -96,11 +96,7 @@ export interface GovernanceRepository {
    * Filters rather than throws: a viewer asking to see reviews should get the
    * ones they may see, not an error telling them others exist.
    */
-  listVisibleReviews(
-    cardId: string,
-    gateId: GateId,
-    viewer: { id: string; role: ReviewViewerRole },
-  ): Review[];
+  listVisibleReviews(cardId: string, gateId: GateId, viewerId: string): Review[];
   /**
    * The effective reviewer count for a gate: card override, then project
    * override, then the ladder default (spec 20.2.1). Exposed so the visibility
@@ -127,6 +123,8 @@ export interface GovernanceRepository {
   getHandover(cardId: string): CardHandover | null;
   /** Points still unwritten, counting a claimed-output section as unwritten. */
   missingHandoverPoints(cardId: string): HandoverPoint[];
+  /** Whether an unresolved P0 stands against this card. */
+  hasOpenP0(cardId: string): boolean;
   /** Stores a day's report, replacing any earlier build of the same day. */
   saveAdjudicationReport(report: AdjudicationReport): void;
   getAdjudicationReport(date: string): AdjudicationReport | null;
@@ -339,6 +337,20 @@ export function createGovernanceRepository(connection: Database.Database): Gover
     (connection
       .prepare('SELECT * FROM review_findings WHERE review_id = ? ORDER BY priority, created_at')
       .all(reviewId) as FindingRow[]).map(mapFinding);
+
+  /** The user who owns the portfolio this card ultimately belongs to. */
+  const ownerOfCard = (cardId: string): string | null => {
+    const row = connection
+      .prepare(
+        `SELECT pf.owner_user_id AS owner FROM cards c
+           JOIN platform_projects p ON p.id = c.project_id
+           JOIN platform_ventures v ON v.id = p.venture_id
+           JOIN platform_portfolios pf ON pf.id = v.portfolio_id
+          WHERE c.id = ?`,
+      )
+      .get(cardId) as { owner: string } | undefined;
+    return row?.owner ?? null;
+  };
 
   const listCurrentReviews = (cardId: string, gateId: GateId): Review[] =>
     (connection
@@ -631,7 +643,22 @@ export function createGovernanceRepository(connection: Database.Database): Gover
         .all(cardId, gateId) as ReviewRow[])
         .map((row) => mapReview(row, findingsFor(row.id))),
 
-    listVisibleReviews(cardId, gateId, viewer) {
+    listVisibleReviews(cardId, gateId, viewerId) {
+      /*
+       * The role is DERIVED, never supplied. It used to be a parameter, and the
+       * owner branch returns everything — so any route passing a claimed role
+       * through would have let a reviewer read a sealed review by saying
+       * "owner". The plan's own constraint is that no request body may supply
+       * an actor, and a role is an actor's most important attribute.
+       *
+       * Anyone who is neither the portfolio's owner nor this gate's builder is
+       * treated as a reviewer: that is the strictest branch, so a stranger to
+       * the gate sees exactly what an unfiled reviewer sees, which is nothing.
+       */
+      const viewerRole: ReviewViewerRole =
+        viewerId === ownerOfCard(cardId) ? 'owner'
+          : getBuilder(cardId, gateId)?.orgAgentId === viewerId ? 'builder'
+            : 'reviewer';
       const current = listCurrentReviews(cardId, gateId);
       const required = requiredReviewersFor(cardId, gateId);
       // Distinct reviewers whose review currently stands. Counting rows instead
@@ -660,8 +687,8 @@ export function createGovernanceRepository(connection: Database.Database): Gover
         requiredReviewers: required,
         filedReviewerIds,
         reviewAuthorId: review.reviewerOrgAgentId,
-        viewerId: viewer.id,
-        viewerRole: viewer.role,
+        viewerId,
+        viewerRole,
         now,
         deadlineAt,
       }));
@@ -770,6 +797,11 @@ export function createGovernanceRepository(connection: Database.Database): Gover
 
     missingHandoverPoints: (cardId) =>
       handoverIsComplete(getHandover(cardId)?.points ?? {}).missing,
+
+    hasOpenP0: (cardId) =>
+      connection
+        .prepare("SELECT 1 FROM p0_escalations WHERE card_id = ? AND status = 'open' LIMIT 1")
+        .get(cardId) !== undefined,
 
     saveAdjudicationReport(report) {
       // Keyed by date, so rebuilding a day updates it rather than leaving two

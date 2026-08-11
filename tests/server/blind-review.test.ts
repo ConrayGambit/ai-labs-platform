@@ -151,12 +151,28 @@ describe('blind review, through the repository', () => {
     const filed = file(card.id, reviewerA.id);
 
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: reviewerA.id, role: 'reviewer' })
+      .listVisibleReviews(card.id, 'G1', reviewerA.id)
       .map((review) => review.id)).toEqual([filed.id]);
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: reviewerB.id, role: 'reviewer' })).toEqual([]);
+      .listVisibleReviews(card.id, 'G1', reviewerB.id)).toEqual([]);
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toEqual([]);
+      .listVisibleReviews(card.id, 'G1', builder.id)).toEqual([]);
+  });
+
+  // Found by code review: the caller supplied the viewer's ROLE, and the owner
+  // branch returns everything. Any route that passed a claimed role through
+  // would have let a reviewer read the sealed review by saying "owner" — and
+  // the plan's own constraint is that no request body may supply an actor.
+  it('DERIVES the viewer role rather than believing a claim', () => {
+    const { card, reviewerA, reviewerB } = seed(2);
+    file(card.id, reviewerA.id);
+
+    // reviewerB is a reviewer, whatever it calls itself.
+    expect(database!.governance.listVisibleReviews(card.id, 'G1', reviewerB.id)).toEqual([]);
+    // A stranger to the gate is not an owner either.
+    expect(database!.governance.listVisibleReviews(card.id, 'G1', 'somebody-else')).toEqual([]);
+    // And the real owner still sees everything.
+    expect(database!.governance.listVisibleReviews(card.id, 'G1', 'owner')).toHaveLength(1);
   });
 
   it('shows the owner a sealed review anyway', () => {
@@ -164,7 +180,7 @@ describe('blind review, through the repository', () => {
     file(card.id, reviewerA.id);
 
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: 'owner', role: 'owner' })).toHaveLength(1);
+      .listVisibleReviews(card.id, 'G1', 'owner')).toHaveLength(1);
   });
 
   it('UNSEALS everything once both reviewers have filed', () => {
@@ -173,9 +189,9 @@ describe('blind review, through the repository', () => {
     file(card.id, reviewerB.id);
 
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toHaveLength(2);
+      .listVisibleReviews(card.id, 'G1', builder.id)).toHaveLength(2);
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: reviewerA.id, role: 'reviewer' })).toHaveLength(2);
+      .listVisibleReviews(card.id, 'G1', reviewerA.id)).toHaveLength(2);
   });
 
   it('does not engage at all when the project runs on one reviewer', () => {
@@ -185,7 +201,7 @@ describe('blind review, through the repository', () => {
     // One reviewer is the default. There is nobody to be blind from, and the
     // platform does not pretend otherwise.
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toHaveLength(1);
+      .listVisibleReviews(card.id, 'G1', builder.id)).toHaveLength(1);
   });
 
   it('counts a superseded review as not filed, so a reviewer cannot unseal alone', () => {
@@ -197,7 +213,7 @@ describe('blind review, through the repository', () => {
     // unseal the gate by filing twice.
     expect(database!.governance.listReviews(card.id, 'G1')).toHaveLength(2);
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toEqual([]);
+      .listVisibleReviews(card.id, 'G1', builder.id)).toEqual([]);
   });
 
   // Found in review: the deadline was the minimum across EVERY assignment, so a
@@ -213,7 +229,7 @@ describe('blind review, through the repository', () => {
 
     // Reviewer B is still out and has no deadline. Nothing unseals.
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toEqual([]);
+      .listVisibleReviews(card.id, 'G1', builder.id)).toEqual([]);
   });
 
   it('requires EVERY outstanding reviewer to be out of time, not merely one', () => {
@@ -253,7 +269,7 @@ describe('blind review, through the repository', () => {
     });
 
     expect(database.governance
-      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toEqual([]);
+      .listVisibleReviews(card.id, 'G1', builder.id)).toEqual([]);
   });
 
   it('unseals once an outstanding reviewer deadline has passed', () => {
@@ -265,6 +281,6 @@ describe('blind review, through the repository', () => {
     });
 
     expect(database!.governance
-      .listVisibleReviews(card.id, 'G1', { id: builder.id, role: 'builder' })).toHaveLength(1);
+      .listVisibleReviews(card.id, 'G1', builder.id)).toHaveLength(1);
   });
 });

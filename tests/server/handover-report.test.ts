@@ -96,6 +96,7 @@ describe('the gate that requires it', () => {
     artifactCount: 1,
     missingSpecificationSections: [],
     missingHandoverPoints,
+    hasOpenP0: false,
   });
 
   it('DENIES closing a card while the handover is incomplete, naming what is missing', () => {
@@ -126,6 +127,7 @@ describe('the gate that requires it', () => {
       evidence: {
         reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
         missingSpecificationSections: [], missingHandoverPoints: [...HANDOVER_POINTS],
+        hasOpenP0: false,
       },
     });
 
@@ -139,6 +141,7 @@ describe('the gate that requires it', () => {
       evidence: {
         reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
         missingSpecificationSections: [], missingHandoverPoints: [...HANDOVER_POINTS],
+        hasOpenP0: false,
       },
     })).toEqual({ allowed: true });
   });

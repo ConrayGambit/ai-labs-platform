@@ -125,6 +125,19 @@ export function canAdvance(request: AdvanceRequest): AdvanceVerdict {
   // Becoming blocked is never an advance.
   if (to === 'blocked') return { allowed: true };
   /*
+   * An open P0 pins the card where it is. Without this the stop was reversible
+   * in one move: canAdvance exempted every departure from `blocked`, so a
+   * stopped card could be walked back into progress with the escalation still
+   * open, and the rule the spec calls "stops the affected work" stopped nothing.
+   * Only the owner resolving the escalation releases it.
+   */
+  if (evidence.hasOpenP0) {
+    return {
+      allowed: false,
+      reason: 'An unresolved P0 stands against this card; only the owner can clear it.',
+    };
+  }
+  /*
    * Returning from blocked is not an advance either — requiring evidence to
    * resume work would strand the card in the one column nobody wants it to sit
    * in. But CLOSING is an advance whatever the card was doing beforehand, and

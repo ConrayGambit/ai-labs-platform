@@ -150,6 +150,7 @@ describe('the vertical slice', () => {
         reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
         missingSpecificationSections: missing,
         missingHandoverPoints: database.governance.missingHandoverPoints(card.id),
+        hasOpenP0: database.governance.hasOpenP0(card.id),
       },
     });
     expect(denial(denied).reason).toMatch(/G1/);
@@ -162,6 +163,7 @@ describe('the vertical slice', () => {
         reviewsFiled: 1, ownerDecision: false, artifactCount: 1,
         missingSpecificationSections: missing,
         missingHandoverPoints: database.governance.missingHandoverPoints(card.id),
+        hasOpenP0: database.governance.hasOpenP0(card.id),
       },
     });
     expect(denial(withReview).reason).toMatch(/specification/i);
@@ -186,6 +188,7 @@ describe('the vertical slice', () => {
         reviewsFiled: 1, ownerDecision: false, artifactCount: 1,
         missingSpecificationSections: database.governance.missingSpecificationSections(card.id),
         missingHandoverPoints: database.governance.missingHandoverPoints(card.id),
+        hasOpenP0: database.governance.hasOpenP0(card.id),
       },
     });
     expect(allowed).toEqual({ allowed: true });
