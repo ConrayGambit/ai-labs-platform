@@ -67,17 +67,45 @@ interface ErrorBody {
   error?: string;
 }
 
+/**
+ * The platform reached the server and it refused, deliberately, in words a
+ * person can read — a response with a body of `{ error: string }`.
+ *
+ * Distinct from a plain `Error`, which from this module always means the
+ * request never reached the server at all (offline, DNS failure, the dev
+ * proxy not running, CORS). A caller rendering "the server's own refusal"
+ * needs to tell those apart: a browser's own `TypeError: Failed to fetch` is
+ * not a refusal, and rendering it as one would tell a person the platform
+ * said something it never had the chance to say.
+ */
+export class ServerRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ServerRefusal';
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  // Called as fetch(path) rather than fetch(path, undefined) when there is no
-  // init: behaviorally identical, but it keeps every GET a plain one-argument
-  // call rather than one with a silent extra `undefined`.
-  const response = await (init ? fetch(path, init) : fetch(path));
+  let response: Response;
+  try {
+    // Called as fetch(path) rather than fetch(path, undefined) when there is
+    // no init: behaviorally identical, but it keeps every GET a plain
+    // one-argument call rather than one with a silent extra `undefined`.
+    response = await (init ? fetch(path, init) : fetch(path));
+  } catch (cause) {
+    // fetch() itself rejected: the request never reached the server, so
+    // there is no server refusal to carry. A plain Error, not a
+    // ServerRefusal — the original failure is kept as `cause` for
+    // diagnostics rather than folded into the message text a UI might show
+    // verbatim.
+    throw new Error('Could not reach the server', { cause });
+  }
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as ErrorBody | null;
     // The server's own words, verbatim. Falling back to a generic message only
     // when the body genuinely carried none — a malformed or empty error body,
     // not the ordinary case.
-    throw new Error(body?.error ?? `Request failed (${response.status})`);
+    throw new ServerRefusal(body?.error ?? `Request failed (${response.status})`);
   }
   return (await response.json()) as T;
 }
