@@ -4,6 +4,7 @@ import {
   getCard,
   getOverrides,
   getReviewState,
+  getSpecification,
   moveCard,
   putNotes,
   ServerRefusal,
@@ -120,6 +121,28 @@ describe('the API client', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/cards/card-1/gates/G1/review-state');
     expect(result).toEqual(state);
+  });
+
+  it('fetches the specification card from /api/cards/:cardId/specification', async () => {
+    const specification = {
+      cardId: 'card-1',
+      sections: { problem: 'Cards render from a legacy table.' },
+      updatedAt: '2026-08-10T00:00:00.000Z',
+    };
+    fetchMock.mockReturnValueOnce(jsonResponse(specification));
+
+    const result = await getSpecification('card-1');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/cards/card-1/specification');
+    expect(result).toEqual(specification);
+  });
+
+  it('returns null when no specification has been written yet', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse(null));
+
+    const result = await getSpecification('card-1');
+
+    expect(result).toBeNull();
   });
 
   it('lists overrides platform-wide when no card is named', async () => {
