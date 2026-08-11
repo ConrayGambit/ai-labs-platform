@@ -77,6 +77,10 @@ function stubRoutes(overrides: Record<string, () => Promise<Response>> = {}) {
     // clears gateId on a move to 'blocked'). None of this file's fixtures
     // carry an open escalation, so the quiet, no-render answer throughout.
     if (url === '/api/escalations?cardId=card-1') return jsonResponse({ escalations: [] });
+    // OverrideRegisterView is likewise mounted unconditionally (fix round 1):
+    // the register outlives whichever gate produced an entry, so it is not
+    // gated on card.gateId the way Review/Findings are.
+    if (url === '/api/override-register?cardId=card-1') return jsonResponse({ entries: [] });
     if (key === 'PUT /api/cards/card-1/notes') {
       const { notes } = JSON.parse(String(init?.body)) as { notes: string };
       return jsonResponse({ ...card, ownerNotes: notes });

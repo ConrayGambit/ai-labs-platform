@@ -254,6 +254,11 @@ describe('orchestrator dashboard', () => {
         return jsonResponse({ backlog: [], ready: [], in_progress: [], review: [], done: [], blocked: [] });
       }
       if (url === '/api/projects/project-2/team') return jsonResponse({ agents: [] });
+      // AdjudicationReportView (fix round 1) is reachable from its own nav
+      // item now; any date it asks for answers "no report" here, since none
+      // of this file's tests need real report content, only that the route
+      // is reached at all.
+      if (url.startsWith('/api/adjudication-reports/')) return jsonResponse(null);
       throw new Error(`Unexpected request: ${url}`);
     }));
   });
@@ -429,5 +434,21 @@ describe('orchestrator dashboard', () => {
         }),
       }),
     ));
+  });
+
+  it('opens the daily adjudication report from its own nav item (fix round 1: it was reachable by nothing before)', async () => {
+    vi.setSystemTime(new Date('2026-08-11T12:00:00.000Z'));
+    render(<App />);
+    await screen.findByText('Mission control');
+    fireEvent.click(screen.getByRole('button', { name: /report/i }));
+
+    expect(await screen.findByText('Daily report')).toBeInTheDocument();
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/adjudication-reports/2026-08-11'));
+    // Eight sections render even here, from a live nav click rather than a
+    // directly-rendered component in the view's own test file.
+    expect(screen.getByText('P0 escalations')).toBeInTheDocument();
+    expect(screen.getByText('Next work item')).toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 });

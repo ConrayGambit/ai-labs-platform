@@ -92,9 +92,15 @@ export function ReviewPanel({ cardId, gateId }: ReviewPanelProps) {
       {loadState === 'error' && <p className="form-error" role="alert">{loadError}</p>}
       {loadState === 'ready' && gateReview && (
         <>
-          <p className="review-progress">
+          {/*
+            10px mono only survives framed in a container (DESIGN.md's Small
+            Type Is Earned Rule) — reusing .card-pill rather than a bare,
+            unframed <p> at the same size, the same object every other short
+            machine-generated token on this page already is.
+          */}
+          <span className="card-pill">
             Filed {gateReview.filedReviewerIds.length} of {gateReview.requiredReviewers}
-          </p>
+          </span>
           {gateReview.sealed && (
             <div className="review-seal" role="status">
               <p className="field-label">Sealed</p>

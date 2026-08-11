@@ -12,6 +12,7 @@ import { SPECIFICATION_SECTIONS, type CardSpecification } from '../../shared/gov
 import type { BoardColumn, BoardColumnKey } from '../../shared/work.js';
 import { EscalationBanner } from './EscalationBanner.js';
 import { FindingsPanel } from './FindingsPanel.js';
+import { OverrideRegisterView } from './OverrideRegisterView.js';
 import { ReviewPanel } from './ReviewPanel.js';
 import { RunPanel } from './RunPanel.js';
 
@@ -54,6 +55,14 @@ export function CardDetailView({ cardId, onClose, onMoved }: CardDetailViewProps
   const [moveTarget, setMoveTarget] = useState('');
   const [moveState, setMoveState] = useState<'idle' | 'moving' | 'moved' | 'error'>('idle');
   const [moveError, setMoveError] = useState<string | null>(null);
+
+  // Bumped after a successful adjudication and used as `key` on both
+  // ReviewPanel and FindingsPanel below, so the two remount and refetch
+  // together rather than each holding its own copy of the same gate's state
+  // that a ruling on one of them could leave the other reading stale. Same
+  // "bump a token, force a fresh fetch" shape App.tsx already uses for
+  // `boardRefreshToken` after a move.
+  const [governanceRefreshToken, setGovernanceRefreshToken] = useState(0);
 
   const titleId = useId();
   const notesFieldId = useId();
@@ -258,19 +267,35 @@ export function CardDetailView({ cardId, onClose, onMoved }: CardDetailViewProps
               <>
                 <section className="detail-section">
                   <h3 className="detail-heading">Review</h3>
-                  <ReviewPanel cardId={cardId} gateId={detail.card.gateId} />
+                  <ReviewPanel cardId={cardId} gateId={detail.card.gateId} key={`review-${governanceRefreshToken}`} />
                 </section>
 
                 <section className="detail-section">
                   <h3 className="detail-heading">Findings</h3>
                   <FindingsPanel
-                    assigneeOrgAgentId={detail.card.assigneeOrgAgentId}
                     cardId={cardId}
                     gateId={detail.card.gateId}
+                    key={`findings-${governanceRefreshToken}`}
+                    onAdjudicated={() => setGovernanceRefreshToken((token) => token + 1)}
                   />
                 </section>
               </>
             )}
+
+            {/*
+              Unconditional and outside the gate check above, on purpose: an
+              override survives past the gate that produced it (the register
+              is append-only and keyed to the card, not to whichever gate is
+              current — src/shared/governance.ts's OverrideEntry carries a
+              cardId, never a gateId), so a card that has since moved on must
+              still show what was overridden on it earlier. "Beside Review
+              and Findings" means positioned next to them, not gated with
+              them.
+            */}
+            <section className="detail-section">
+              <h3 className="detail-heading">Override register</h3>
+              <OverrideRegisterView cardId={cardId} />
+            </section>
 
             <section className="detail-section">
               <h3 className="detail-heading">Run</h3>

@@ -18,6 +18,7 @@ import type {
   TaskStatus,
 } from '../shared/domain.js';
 import { RequestFailedError } from './idempotency.js';
+import { AdjudicationReportView } from './views/AdjudicationReportView.js';
 import { CardBoardView } from './views/CardBoardView.js';
 import { CardDetailView } from './views/CardDetailView.js';
 
@@ -55,7 +56,7 @@ const EMPTY_BOARD: KanbanBoard = {
   blocked: [],
 };
 
-type View = 'dashboard' | 'organizations' | 'organization' | 'cards' | 'skills' | 'runtimes';
+type View = 'dashboard' | 'organizations' | 'organization' | 'cards' | 'report' | 'skills' | 'runtimes';
 type OrgTab = 'board' | 'team';
 
 async function getJson<T>(url: string): Promise<T> {
@@ -1321,9 +1322,11 @@ export function App() {
         ? (selectedOrganization?.name ?? 'Organization')
         : view === 'cards'
           ? 'Cards'
-          : view === 'skills'
-            ? 'Skills'
-            : 'Runtime registry';
+          : view === 'report'
+            ? 'Report'
+            : view === 'skills'
+              ? 'Skills'
+              : 'Runtime registry';
 
   return (
     <div className="app-shell">
@@ -1341,6 +1344,9 @@ export function App() {
           </button>
           <button className={view === 'cards' ? 'active' : ''} onClick={() => setView('cards')} type="button">
             <span aria-hidden="true">▥</span> Cards
+          </button>
+          <button className={view === 'report' ? 'active' : ''} onClick={() => setView('report')} type="button">
+            <span aria-hidden="true">▦</span> Report
           </button>
           <button className={view === 'skills' ? 'active' : ''} onClick={() => setView('skills')} type="button">
             <span aria-hidden="true">✦</span> Skills
@@ -1466,6 +1472,7 @@ export function App() {
               </div>
             )
           )}
+          {!loading && !error && view === 'report' && <AdjudicationReportView />}
           {!loading && !error && view === 'skills' && <SkillsView skills={skills} />}
           {!loading && !error && view === 'runtimes' && (
             <RuntimesView runtimes={runtimes} onSaveOptions={saveRuntimeOptions} />

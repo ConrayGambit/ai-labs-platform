@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { getAdjudicationReport } from '../api/client.js';
 import { ADJUDICATION_SECTIONS, type AdjudicationReport, type AdjudicationSection } from '../../shared/governance.js';
 
 export interface AdjudicationReportViewProps {
@@ -14,27 +15,6 @@ function humanize(key: string): string {
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-/**
- * Mirrors `request()` in `src/web/api/client.ts` field for field, without
- * adding to that file's route table. `GET /api/adjudication-reports/:date`
- * is not named in this task's own "Consumes" list at all — an omission this
- * view could not have worked around, since it is the one route that makes it
- * possible to render a report in the first place.
- */
-async function fetchAdjudicationReport(date: string): Promise<AdjudicationReport | null> {
-  let response: Response;
-  try {
-    response = await fetch(`/api/adjudication-reports/${date}`);
-  } catch (cause) {
-    throw new Error('Could not reach the server', { cause });
-  }
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `Request failed (${response.status})`);
-  }
-  return (await response.json()) as AdjudicationReport | null;
 }
 
 /**
@@ -54,6 +34,16 @@ interface ReportSectionProps {
   lines: string[] | null;
 }
 
+/**
+ * One of the eight fixed sections. Always renders its own heading, and
+ * always renders at least one line — real content when there is any, the
+ * shared placeholder otherwise. Never `return null` for an empty or missing
+ * `lines`: that is exactly the failure that would make "eight sections on a
+ * silent day" quietly stop being true, with no test failing to say so unless
+ * one exercises this branch directly (tests/web/adjudication-report.test.tsx
+ * does, deliberately, with a genuinely empty array rather than only ever the
+ * server's own non-empty "nothing happened" sentences).
+ */
 function ReportSection({ section, lines }: ReportSectionProps) {
   return (
     <section className="detail-section">
@@ -76,6 +66,12 @@ function ReportSection({ section, lines }: ReportSectionProps) {
  * and a date with no report row at all still renders the same eight
  * headings with a shared placeholder. Silence is informative either way, and
  * is never rendered as an error or a blank screen.
+ *
+ * Self-contained, including its own page heading (`.workspace-panel` +
+ * `.section-heading`, the same shell `SkillsView`/`RuntimesView` use in
+ * `App.tsx`) so a caller can mount it directly as a navigation destination
+ * with no wrapping of its own — this is that destination; nothing else in
+ * this increment reaches the daily report otherwise.
  */
 export function AdjudicationReportView({ date: initialDate }: AdjudicationReportViewProps) {
   const [date, setDate] = useState(initialDate ?? todayUtc());
@@ -83,12 +79,13 @@ export function AdjudicationReportView({ date: initialDate }: AdjudicationReport
   const [loadError, setLoadError] = useState<string | null>(null);
   const [report, setReport] = useState<AdjudicationReport | null>(null);
   const dateFieldId = useId();
+  const titleId = useId();
 
   useEffect(() => {
     let cancelled = false;
     setLoadState('loading');
     setLoadError(null);
-    fetchAdjudicationReport(date).then((result) => {
+    getAdjudicationReport(date).then((result) => {
       if (cancelled) return;
       setReport(result);
       setLoadState('ready');
@@ -101,9 +98,20 @@ export function AdjudicationReportView({ date: initialDate }: AdjudicationReport
   }, [date]);
 
   return (
-    <div className="adjudication-report">
+    <section aria-labelledby={titleId} className="workspace-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Owner-only</p>
+          <h2 id={titleId}>Daily report</h2>
+          <p>Eight fixed sections for one calendar day, written even on a day with nothing in them.</p>
+        </div>
+      </div>
+
       <div className="detail-field report-controls">
-        <label className="field-label" htmlFor={dateFieldId}>Date</label>
+        {/* Named explicitly: the field opens on today in UTC, which after
+            midnight local time is a date a local picker would otherwise show
+            with nothing explaining why it is not "today" on this machine. */}
+        <label className="field-label" htmlFor={dateFieldId}>Date (UTC)</label>
         <input id={dateFieldId} onChange={(event) => setDate(event.target.value)} type="date" value={date} />
       </div>
 
@@ -116,6 +124,6 @@ export function AdjudicationReportView({ date: initialDate }: AdjudicationReport
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }

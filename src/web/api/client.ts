@@ -10,7 +10,16 @@
  * "request failed" message — losing the text here would make that impossible.
  */
 import type { StopReason } from '../../shared/acp.js';
-import type { CardSpecification, GateReviewState, OverrideEntry } from '../../shared/governance.js';
+import type {
+  AdjudicationReport,
+  CardSpecification,
+  GateReviewState,
+  OverrideEntry,
+  P0Escalation,
+  ReviewAssignment,
+  Ruling,
+  RulingOutcome,
+} from '../../shared/governance.js';
 import type { Room } from '../../shared/room.js';
 import type {
   BoardColumn,
@@ -166,4 +175,64 @@ export async function getOverrides(cardId?: string): Promise<OverrideEntry[]> {
   const query = cardId ? `?cardId=${cardId}` : '';
   const { entries } = await getJson<{ entries: OverrideEntry[] }>(`/api/override-register${query}`);
   return entries;
+}
+
+/**
+ * Every role assignment at one gate — in particular, the one holding
+ * `role: 'builder'`, the identity `POST /api/findings/:findingId/adjudicate`
+ * actually checks (`governance-service.ts`'s `adjudicate`). Distinct from
+ * `Card.assigneeOrgAgentId`, which nothing keeps in sync with it.
+ */
+export async function getAssignments(cardId: string, gateId: GateId): Promise<ReviewAssignment[]> {
+  const { assignments } = await getJson<{ assignments: ReviewAssignment[] }>(
+    `/api/cards/${cardId}/gates/${gateId}/assignments`,
+  );
+  return assignments;
+}
+
+export interface AdjudicateInput {
+  gateId: GateId;
+  outcome: RulingOutcome;
+  reason: string;
+  nextStep?: string;
+  deferredUntil?: string;
+  residualRisk?: string;
+  ruledByOrgAgentId: string;
+}
+
+/**
+ * Mirrors `AdjudicationResult`'s shape (`src/server/governance-service.ts`)
+ * field for field. That type lives in server code and client code may only
+ * import from `src/shared/`, so it is redeclared here from the shared
+ * `Ruling` and `OverrideEntry` types it is actually built from — the same
+ * technique `RunSummary` above uses for `AgentRun`.
+ */
+export interface AdjudicateResult {
+  ruling: Ruling;
+  registerEntry: OverrideEntry | null;
+}
+
+export function adjudicateFinding(findingId: string, input: AdjudicateInput): Promise<AdjudicateResult> {
+  return sendJson(`/api/findings/${findingId}/adjudicate`, 'POST', input);
+}
+
+export async function getEscalations(cardId?: string): Promise<P0Escalation[]> {
+  const query = cardId ? `?cardId=${cardId}` : '';
+  const { escalations } = await getJson<{ escalations: P0Escalation[] }>(`/api/escalations${query}`);
+  return escalations;
+}
+
+export function resolveEscalation(escalationId: string, resolution: string): Promise<P0Escalation> {
+  return sendJson(`/api/escalations/${escalationId}/resolve`, 'POST', { resolution });
+}
+
+/**
+ * `null` both for a date nobody has built a report for yet, and for a day
+ * `buildAdjudicationReport` (`src/server/adjudication-report.ts`) found no
+ * platform activity on at all — it returns `null` without saving a row
+ * rather than writing an empty one. This wrapper does not tell the two
+ * apart; neither can the route.
+ */
+export function getAdjudicationReport(date: string): Promise<AdjudicationReport | null> {
+  return getJson(`/api/adjudication-reports/${date}`);
 }

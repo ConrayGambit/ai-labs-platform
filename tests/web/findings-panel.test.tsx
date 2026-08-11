@@ -35,6 +35,33 @@ function reviewStateWith(findings: ReturnType<typeof findingRow>[]) {
   };
 }
 
+function assignment(role: 'builder' | 'reviewer', orgAgentId: string) {
+  return {
+    id: `assignment-${orgAgentId}`, cardId: 'card-1', gateId: 'G1', role, orgAgentId,
+    assignedAt: '2026-08-10T00:00:00.000Z', reviewDeadlineAt: null,
+  };
+}
+
+/**
+ * Routes a mocked `fetch` for FindingsPanel's two GETs plus whatever
+ * `extra` handlers a test supplies (typically the adjudicate POST).
+ */
+function stubFindingsRoutes(
+  state: ReturnType<typeof reviewStateWith>,
+  assignments: ReturnType<typeof assignment>[],
+  extra: Record<string, () => Promise<Response>> = {},
+) {
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    const key = `${method} ${url}`;
+    if (url === '/api/cards/card-1/gates/G1/review-state') return jsonResponse(state);
+    if (url === '/api/cards/card-1/gates/G1/assignments') return jsonResponse({ assignments });
+    if (extra[key]) return extra[key]();
+    throw new Error(`Unexpected request: ${key}`);
+  }));
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -47,63 +74,79 @@ describe('the findings panel', () => {
       findingRow('finding-p2', 'P2', 'The cost ceiling is evaluated late.'),
       findingRow('finding-p0', 'P0', 'The route does not check venture access.'),
     ]);
-    vi.stubGlobal('fetch', vi.fn(() => jsonResponse(state)));
+    stubFindingsRoutes(state, []);
 
-    render(<FindingsPanel assigneeOrgAgentId="builder-1" cardId="card-1" gateId="G1" />);
+    render(<FindingsPanel cardId="card-1" gateId="G1" />);
     await waitFor(() => expect(screen.getByText('The route does not check venture access.')).toBeInTheDocument());
 
     const priorityPills = screen.getAllByText(/^P[0-4]$/);
     expect(priorityPills.map((pill) => pill.textContent)).toEqual(['P0', 'P2']);
   });
 
-  it('collects the reason and calls the adjudicate route with the chosen outcome, rendering the resulting ruling', async () => {
+  it("fetches the gate's real assignments and seeds ruledByOrgAgentId from the registered builder, never a guess", async () => {
     const state = reviewStateWith([findingRow('finding-p2', 'P2', 'The cost ceiling is evaluated late.')]);
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === '/api/cards/card-1/gates/G1/review-state') return jsonResponse(state);
-      if (url === '/api/findings/finding-p2/adjudicate') {
-        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        expect(body).toEqual({
-          gateId: 'G1', outcome: 'adopted', reason: 'Fair, and already fixed.',
-          ruledByOrgAgentId: 'builder-1',
-        });
+    stubFindingsRoutes(state, [assignment('reviewer', 'reviewer-1'), assignment('builder', 'builder-real')], {
+      'POST /api/findings/finding-p2/adjudicate': () => {
         return jsonResponse({
           ruling: {
-            id: 'ruling-1', findingId: 'finding-p2', ruledByOrgAgentId: 'builder-1', ruledByUserId: null,
-            outcome: 'adopted', reason: 'Fair, and already fixed.', nextStep: null, residualRisk: null,
+            id: 'ruling-1', findingId: 'finding-p2', ruledByOrgAgentId: 'builder-real', ruledByUserId: null,
+            outcome: 'adopted', reason: 'Fair.', nextStep: null, residualRisk: null,
             isFinal: false, ruledAt: '2026-08-10T00:00:00.000Z',
           },
           registerEntry: null,
         }, 201);
-      }
-      throw new Error(`Unexpected request: ${url}`);
+      },
     });
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = vi.mocked(fetch);
 
-    render(<FindingsPanel assigneeOrgAgentId="builder-1" cardId="card-1" gateId="G1" />);
+    render(<FindingsPanel cardId="card-1" gateId="G1" />);
     await waitFor(() => expect(screen.getByText('The cost ceiling is evaluated late.')).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith('/api/cards/card-1/gates/G1/assignments');
 
-    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Fair, and already fixed.' } });
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Fair.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Adopt' }));
 
-    expect(await screen.findByText(/ruled adopted — fair, and already fixed\./i)).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/findings/finding-p2/adjudicate',
+      expect.objectContaining({
+        body: JSON.stringify({ gateId: 'G1', outcome: 'adopted', reason: 'Fair.', ruledByOrgAgentId: 'builder-real' }),
+      }),
+    ));
+    expect(await screen.findByText(/ruled adopted — fair\./i)).toBeInTheDocument();
+  });
+
+  it('calls onAdjudicated once an adjudication succeeds', async () => {
+    const state = reviewStateWith([findingRow('finding-p2', 'P2', 'The cost ceiling is evaluated late.')]);
+    stubFindingsRoutes(state, [assignment('builder', 'builder-1')], {
+      'POST /api/findings/finding-p2/adjudicate': () => jsonResponse({
+        ruling: {
+          id: 'ruling-1', findingId: 'finding-p2', ruledByOrgAgentId: 'builder-1', ruledByUserId: null,
+          outcome: 'adopted', reason: 'Fair.', nextStep: null, residualRisk: null,
+          isFinal: false, ruledAt: '2026-08-10T00:00:00.000Z',
+        },
+        registerEntry: null,
+      }, 201),
+    });
+    const onAdjudicated = vi.fn();
+
+    render(<FindingsPanel cardId="card-1" gateId="G1" onAdjudicated={onAdjudicated} />);
+    await waitFor(() => expect(screen.getByText('The cost ceiling is evaluated late.')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Fair.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Adopt' }));
+
+    await waitFor(() => expect(onAdjudicated).toHaveBeenCalledTimes(1));
   });
 
   it('renders the server refusal verbatim when adjudication is refused, never a predicted reason', async () => {
     const state = reviewStateWith([findingRow('finding-p2', 'P2', 'The cost ceiling is evaluated late.')]);
-    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === '/api/cards/card-1/gates/G1/review-state') return jsonResponse(state);
-      if (url === '/api/findings/finding-p2/adjudicate') {
-        return jsonResponse(
-          { error: 'A deferral needs a named next step and a date to revisit it; without them it is a finding dropped' },
-          409,
-        );
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }));
+    stubFindingsRoutes(state, [assignment('builder', 'builder-1')], {
+      'POST /api/findings/finding-p2/adjudicate': () => jsonResponse(
+        { error: 'A deferral needs a named next step and a date to revisit it; without them it is a finding dropped' },
+        409,
+      ),
+    });
 
-    render(<FindingsPanel assigneeOrgAgentId="builder-1" cardId="card-1" gateId="G1" />);
+    render(<FindingsPanel cardId="card-1" gateId="G1" />);
     await waitFor(() => expect(screen.getByText('The cost ceiling is evaluated late.')).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Revisit later.' } });
@@ -116,9 +159,9 @@ describe('the findings panel', () => {
 
   it('never disables the three outcomes on its own guess about which is allowed', async () => {
     const state = reviewStateWith([findingRow('finding-p0', 'P0', 'The route does not check venture access.')]);
-    vi.stubGlobal('fetch', vi.fn(() => jsonResponse(state)));
+    stubFindingsRoutes(state, [assignment('builder', 'builder-1')]);
 
-    render(<FindingsPanel assigneeOrgAgentId="builder-1" cardId="card-1" gateId="G1" />);
+    render(<FindingsPanel cardId="card-1" gateId="G1" />);
     await waitFor(() => expect(screen.getByText('The route does not check venture access.')).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'It goes to the owner.' } });
@@ -126,6 +169,20 @@ describe('the findings panel', () => {
     // rule to enforce (governance-policy.ts's canOverride), not this panel's
     // to pre-empt by disabling the button.
     expect(screen.getByRole('button', { name: 'Override' })).toBeEnabled();
+  });
+
+  it('names the true reason adjudication is unavailable when no builder is registered at the gate, never an invented one', async () => {
+    const state = reviewStateWith([findingRow('finding-p2', 'P2', 'The cost ceiling is evaluated late.')]);
+    // Nobody holds the builder role yet — only a reviewer is assigned.
+    stubFindingsRoutes(state, [assignment('reviewer', 'reviewer-1')]);
+
+    render(<FindingsPanel cardId="card-1" gateId="G1" />);
+    await waitFor(() => expect(screen.getByText('The cost ceiling is evaluated late.')).toBeInTheDocument());
+
+    expect(screen.getByText('No builder is registered at this gate yet.')).toBeInTheDocument();
+    expect(screen.queryByText(/assign an agent to this card/i)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Fine.' } });
+    expect(screen.getByRole('button', { name: 'Adopt' })).toBeDisabled();
   });
 });
 

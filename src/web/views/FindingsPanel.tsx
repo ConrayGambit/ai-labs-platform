@@ -1,86 +1,36 @@
 import { useEffect, useState } from 'react';
-import { getReviewState } from '../api/client.js';
-import type { Finding, FindingPriority, OverrideEntry, Ruling, RulingOutcome } from '../../shared/governance.js';
+import { adjudicateFinding, getAssignments, getReviewState, type AdjudicateResult } from '../api/client.js';
+import type { Finding, FindingPriority, RulingOutcome } from '../../shared/governance.js';
 import type { GateId } from '../../shared/work.js';
 
 export interface FindingsPanelProps {
   cardId: string;
   gateId: GateId;
   /**
-   * `Card.assigneeOrgAgentId` — the same field RunPanel takes under the same
-   * name for "who a run started from here runs as". Here it seeds
-   * `ruledByOrgAgentId` on an adjudication. The server is the only authority
-   * on whether this identity actually holds the builder assignment at this
-   * gate — it refuses otherwise ("Only the builder at G1 may adjudicate: ...
-   * is not it"), rendered verbatim below. This prop is a convenience default,
-   * never a rule.
+   * Called after any adjudicate call this panel makes succeeds, whatever the
+   * outcome. `CardDetailView` uses this to force a fresh fetch of related
+   * governance state elsewhere on the card (ReviewPanel included) rather than
+   * leaving it to read as of when the dialog first opened.
    */
-  assigneeOrgAgentId: string | null;
-}
-
-/**
- * Mirrors `AdjudicationResult` (src/server/governance-service.ts) field for
- * field. That type lives in server code and client code may only import from
- * src/shared/, so it is redeclared here from the shared `Ruling` and
- * `OverrideEntry` types the server shape is actually built from — the same
- * technique `RunSummary` uses in src/web/api/client.ts.
- */
-interface AdjudicateResult {
-  ruling: Ruling;
-  registerEntry: OverrideEntry | null;
+  onAdjudicated?: () => void;
 }
 
 /** Hardest first. Presentation order only — the ladder's own meaning lives entirely server-side. */
 const PRIORITY_ORDER: readonly FindingPriority[] = ['P0', 'P1', 'P2', 'P3', 'P4'];
 
-/**
- * Mirrors `request()` in `src/web/api/client.ts` field for field, without
- * adding to that file's route table: this task's brief lists
- * `POST /api/findings/:findingId/adjudicate` as a bare route, the same way
- * Task 7's brief left the run-start route for RunPanel to wrap locally.
- */
-async function postAdjudicate(findingId: string, input: {
-  gateId: GateId;
-  outcome: RulingOutcome;
-  reason: string;
-  nextStep: string;
-  deferredUntil: string;
-  residualRisk: string;
-  ruledByOrgAgentId: string;
-}): Promise<AdjudicateResult> {
-  let response: Response;
-  try {
-    response = await fetch(`/api/findings/${findingId}/adjudicate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        gateId: input.gateId,
-        outcome: input.outcome,
-        reason: input.reason,
-        // Sent only once actually written: the schema (adjudicateSchema,
-        // src/server/governance-api.ts) treats these as optional, and an
-        // absent field is what "not filled in" should mean on the wire —
-        // not an empty string masquerading as one.
-        ...(input.nextStep.trim() ? { nextStep: input.nextStep.trim() } : {}),
-        ...(input.deferredUntil.trim() ? { deferredUntil: input.deferredUntil.trim() } : {}),
-        ...(input.residualRisk.trim() ? { residualRisk: input.residualRisk.trim() } : {}),
-        ruledByOrgAgentId: input.ruledByOrgAgentId,
-      }),
-    });
-  } catch (cause) {
-    throw new Error('Could not reach the server', { cause });
-  }
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `Request failed (${response.status})`);
-  }
-  return (await response.json()) as AdjudicateResult;
-}
-
 interface FindingRowProps {
   finding: Finding;
   gateId: GateId;
-  ruledByOrgAgentId: string | null;
+  /**
+   * The org agent actually holding the `builder` role at this gate
+   * (`GET /api/cards/:cardId/gates/:gateId/assignments`), or `null` when
+   * none is registered yet. Never `Card.assigneeOrgAgentId` — that field is
+   * independent of `review_assignments` and nothing syncs the two, so using
+   * it here would be a guess presented as the answer to "who may rule",
+   * which only the server actually knows.
+   */
+  builderOrgAgentId: string | null;
+  onAdjudicated?: () => void;
 }
 
 /**
@@ -92,9 +42,10 @@ interface FindingRowProps {
  * `adjudicate`), not a schema shape, and this panel never predicts it. A
  * defer attempt missing either one is sent anyway, and the server's own
  * refusal ("a finding dropped") renders verbatim below, same as any other
- * outcome.
+ * outcome. The only thing gated client-side is whether there is an identity
+ * to submit at all — not whether the outcome itself would be accepted.
  */
-function FindingRow({ finding, gateId, ruledByOrgAgentId }: FindingRowProps) {
+function FindingRow({ finding, gateId, builderOrgAgentId, onAdjudicated }: FindingRowProps) {
   const [reason, setReason] = useState('');
   const [nextStep, setNextStep] = useState('');
   const [deferredUntil, setDeferredUntil] = useState('');
@@ -104,15 +55,25 @@ function FindingRow({ finding, gateId, ruledByOrgAgentId }: FindingRowProps) {
   const [result, setResult] = useState<AdjudicateResult | null>(null);
 
   async function submit(outcome: RulingOutcome): Promise<void> {
-    if (!ruledByOrgAgentId) return;
+    if (!builderOrgAgentId) return;
     setSubmitting(true);
     setError(null);
     try {
-      const adjudicated = await postAdjudicate(finding.id, {
-        gateId, outcome, reason, nextStep, deferredUntil, residualRisk,
-        ruledByOrgAgentId,
+      const adjudicated = await adjudicateFinding(finding.id, {
+        gateId,
+        outcome,
+        reason,
+        ruledByOrgAgentId: builderOrgAgentId,
+        // Sent only once actually written: the schema (adjudicateSchema,
+        // src/server/governance-api.ts) treats these as optional, and an
+        // absent field is what "not filled in" should mean on the wire —
+        // not an empty string masquerading as one.
+        ...(nextStep.trim() ? { nextStep: nextStep.trim() } : {}),
+        ...(deferredUntil.trim() ? { deferredUntil: deferredUntil.trim() } : {}),
+        ...(residualRisk.trim() ? { residualRisk: residualRisk.trim() } : {}),
       });
       setResult(adjudicated);
+      onAdjudicated?.();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to adjudicate this finding');
     } finally {
@@ -124,10 +85,12 @@ function FindingRow({ finding, gateId, ruledByOrgAgentId }: FindingRowProps) {
   // Basic form hygiene — the same class of guard RunPanel applies to its own
   // message field (canStart) — not a governance judgement about whether an
   // outcome is allowed. Reason is required by the API's own schema
-  // regardless of outcome (z.string().trim().min(1)); identity is required
-  // to attribute the call to anyone at all. Neither is a rule about whether
-  // THIS finding may be adjudicated this way — only the server decides that.
-  const canSubmit = Boolean(ruledByOrgAgentId) && reason.trim().length > 0 && !submitting;
+  // regardless of outcome (z.string().trim().min(1)); an identity is
+  // required to attribute the call to anyone at all, and `builderOrgAgentId`
+  // is an observed fact (fetched from the gate's real assignments), never a
+  // guess about whether THIS finding may be adjudicated this way — only the
+  // server decides that.
+  const canSubmit = Boolean(builderOrgAgentId) && reason.trim().length > 0 && !submitting;
 
   return (
     <li className="finding-row">
@@ -192,8 +155,8 @@ function FindingRow({ finding, gateId, ruledByOrgAgentId }: FindingRowProps) {
           Override
         </button>
       </div>
-      {!ruledByOrgAgentId && (
-        <p className="run-note">Assign an agent to this card before findings can be adjudicated.</p>
+      {!builderOrgAgentId && (
+        <p className="run-note">No builder is registered at this gate yet.</p>
       )}
     </li>
   );
@@ -209,22 +172,24 @@ function FindingRow({ finding, gateId, ruledByOrgAgentId }: FindingRowProps) {
  * covers findings the same way it covers the review that carries them,
  * without this panel having to know anything about sealing itself.
  */
-export function FindingsPanel({ cardId, gateId, assigneeOrgAgentId }: FindingsPanelProps) {
+export function FindingsPanel({ cardId, gateId, onAdjudicated }: FindingsPanelProps) {
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [builderOrgAgentId, setBuilderOrgAgentId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoadState('loading');
     setLoadError(null);
-    getReviewState(cardId, gateId).then((state) => {
+    Promise.all([getReviewState(cardId, gateId), getAssignments(cardId, gateId)]).then(([state, assignments]) => {
       if (cancelled) return;
       const visible = state.visibleReviews
         .flatMap((review) => review.findings)
         .slice()
         .sort((a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority));
       setFindings(visible);
+      setBuilderOrgAgentId(assignments.find((assignment) => assignment.role === 'builder')?.orgAgentId ?? null);
       setLoadState('ready');
     }).catch((reason: unknown) => {
       if (cancelled) return;
@@ -244,7 +209,13 @@ export function FindingsPanel({ cardId, gateId, assigneeOrgAgentId }: FindingsPa
         ) : (
           <ul className="finding-list">
             {findings.map((finding) => (
-              <FindingRow finding={finding} gateId={gateId} key={finding.id} ruledByOrgAgentId={assigneeOrgAgentId} />
+              <FindingRow
+                builderOrgAgentId={builderOrgAgentId}
+                finding={finding}
+                gateId={gateId}
+                key={finding.id}
+                onAdjudicated={onAdjudicated}
+              />
             ))}
           </ul>
         )

@@ -1,50 +1,9 @@
 import { useEffect, useState } from 'react';
+import { getEscalations, resolveEscalation } from '../api/client.js';
 import type { P0Escalation } from '../../shared/governance.js';
 
 export interface EscalationBannerProps {
   cardId: string;
-}
-
-/**
- * Mirrors `request()` in `src/web/api/client.ts` field for field (verbatim
- * server refusal text, a distinct message when the request never arrived),
- * without adding to that file's route table: this task's own brief lists
- * `GET /api/escalations` as a bare route rather than a named wrapper, the
- * same way Task 7's brief left `POST /api/cards/:cardId/runs` for RunPanel to
- * wrap locally rather than extending client.ts.
- */
-async function fetchOpenEscalations(cardId: string): Promise<P0Escalation[]> {
-  let response: Response;
-  try {
-    response = await fetch(`/api/escalations?cardId=${cardId}`);
-  } catch (cause) {
-    throw new Error('Could not reach the server', { cause });
-  }
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `Request failed (${response.status})`);
-  }
-  const { escalations } = (await response.json()) as { escalations: P0Escalation[] };
-  return escalations;
-}
-
-/** Same shape as `fetchOpenEscalations` above, for the one route that clears an escalation. */
-async function postResolveEscalation(escalationId: string, resolution: string): Promise<P0Escalation> {
-  let response: Response;
-  try {
-    response = await fetch(`/api/escalations/${escalationId}/resolve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resolution }),
-    });
-  } catch (cause) {
-    throw new Error('Could not reach the server', { cause });
-  }
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `Request failed (${response.status})`);
-  }
-  return (await response.json()) as P0Escalation;
 }
 
 function formatTimestamp(iso: string): string {
@@ -77,7 +36,7 @@ function EscalationRow({ escalation, onResolved }: EscalationRowProps) {
     setSubmitting(true);
     setError(null);
     try {
-      const resolved = await postResolveEscalation(escalation.id, resolution);
+      const resolved = await resolveEscalation(escalation.id, resolution);
       onResolved(resolved);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to resolve this escalation');
@@ -142,7 +101,7 @@ export function EscalationBanner({ cardId }: EscalationBannerProps) {
     let cancelled = false;
     setLoadState('loading');
     setLoadError(null);
-    fetchOpenEscalations(cardId).then((result) => {
+    getEscalations(cardId).then((result) => {
       if (cancelled) return;
       setEscalations(result);
       setLoadState('ready');

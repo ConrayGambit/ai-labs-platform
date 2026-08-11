@@ -429,7 +429,6 @@ button { color: inherit; }
    status hue that does not describe it: DESIGN.md's Neutral Record Rule, "a
    panel earns importance with position, rule weight and type, not a tint." */
 .review-panel { display: grid; gap: 12px; }
-.review-progress { margin: 0; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
 .review-seal { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); }
 .review-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .review-row { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
@@ -457,6 +456,13 @@ button { color: inherit; }
    carry — a heading, per-escalation rows and the resolve form. Text colour
    is inherited from .error-banner throughout rather than restated. */
 .escalation-banner { display: grid; gap: 12px; padding: 16px; }
+/* .field-label forces Graphite Quiet, which is measured against the canvas
+   and the veil ladder — not against Breach Wash, where it lands under
+   DESIGN.md's own 4.5:1 floor. The two .field-label uses inside this banner
+   (the "P0 escalation" eyebrow, the "Resolution" field label) let the
+   inherited Breach Red Pale through instead, so the interrupt surface never
+   carries the dimmest text on the page. */
+.escalation-banner .field-label { color: inherit; }
 .escalation-text { margin: 0; font-size: 13px; line-height: 1.5; }
 .escalation-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .escalation-row { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid rgba(240,90,90,.25); }

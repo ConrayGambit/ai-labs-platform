@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  adjudicateFinding,
+  getAdjudicationReport,
+  getAssignments,
   getBoard,
   getCard,
+  getEscalations,
   getOverrides,
   getReviewState,
   getSpecification,
   moveCard,
   putNotes,
+  resolveEscalation,
   ServerRefusal,
 } from '../../src/web/api/client.js';
 
@@ -160,6 +165,128 @@ describe('the API client', () => {
     await getOverrides('card-1');
 
     expect(fetchMock).toHaveBeenCalledWith('/api/override-register?cardId=card-1');
+  });
+
+  it('fetches a gate\'s role assignments, from /api/cards/:cardId/gates/:gateId/assignments', async () => {
+    const assignments = [{
+      id: 'assignment-1', cardId: 'card-1', gateId: 'G1', role: 'builder', orgAgentId: 'builder-1',
+      assignedAt: '2026-08-10T00:00:00.000Z', reviewDeadlineAt: null,
+    }];
+    fetchMock.mockReturnValueOnce(jsonResponse({ assignments }));
+
+    const result = await getAssignments('card-1', 'G1');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/cards/card-1/gates/G1/assignments');
+    expect(result).toEqual(assignments);
+  });
+
+  it('adjudicates a finding via POST /api/findings/:findingId/adjudicate', async () => {
+    const ruling = {
+      id: 'ruling-1', findingId: 'finding-1', ruledByOrgAgentId: 'builder-1', ruledByUserId: null,
+      outcome: 'adopted', reason: 'Fair.', nextStep: null, residualRisk: null,
+      isFinal: false, ruledAt: '2026-08-10T00:00:00.000Z',
+    };
+    fetchMock.mockReturnValueOnce(jsonResponse({ ruling, registerEntry: null }, 201));
+
+    const result = await adjudicateFinding('finding-1', {
+      gateId: 'G1', outcome: 'adopted', reason: 'Fair.', ruledByOrgAgentId: 'builder-1',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/findings/finding-1/adjudicate', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ gateId: 'G1', outcome: 'adopted', reason: 'Fair.', ruledByOrgAgentId: 'builder-1' }),
+    }));
+    expect(result).toEqual({ ruling, registerEntry: null });
+  });
+
+  it('lists open escalations platform-wide when no card is named, from GET /api/escalations', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ escalations: [] }));
+
+    const escalations = await getEscalations();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/escalations');
+    expect(escalations).toEqual([]);
+  });
+
+  it('scopes escalations to one card when named', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ escalations: [] }));
+
+    await getEscalations('card-1');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/escalations?cardId=card-1');
+  });
+
+  it('resolves an escalation via POST /api/escalations/:escalationId/resolve', async () => {
+    const resolved = {
+      id: 'escalation-1', findingId: 'finding-1', cardId: 'card-1', status: 'resolved',
+      resolution: 'Fixed at source.', resolvedByUserId: 'owner',
+      raisedAt: '2026-08-10T00:00:00.000Z', resolvedAt: '2026-08-10T01:00:00.000Z',
+    };
+    fetchMock.mockReturnValueOnce(jsonResponse(resolved));
+
+    const result = await resolveEscalation('escalation-1', 'Fixed at source.');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/escalations/escalation-1/resolve', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ resolution: 'Fixed at source.' }),
+    }));
+    expect(result).toEqual(resolved);
+  });
+
+  it('fetches the daily adjudication report, from GET /api/adjudication-reports/:date', async () => {
+    const report = {
+      date: '2026-08-10',
+      sections: {
+        p0_escalations: ['No P0 escalations are open, and none were raised on this date.'],
+        overrides: ['No overrides were recorded on this date.'],
+        deferrals: ['No findings were deferred on this date.'],
+        contested_rulings: ['No rulings were contested on this date.'],
+        gates_passed: ['No card left a gate on this date.'],
+        cards_blocked: ['No card was blocked on this date.'],
+        cost: ['0 run(s) started, 0 input and 0 output tokens (0 total).'],
+        next_work_item: ['No handover named a next work item on this date.'],
+      },
+      builtAt: '2026-08-11T00:00:00.000Z',
+    };
+    fetchMock.mockReturnValueOnce(jsonResponse(report));
+
+    const result = await getAdjudicationReport('2026-08-10');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/adjudication-reports/2026-08-10');
+    expect(result).toEqual(report);
+  });
+
+  it('returns null when no report has been built for a date — a silent day and an unbuilt one look the same', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse(null));
+
+    const result = await getAdjudicationReport('2026-08-09');
+
+    expect(result).toBeNull();
+  });
+
+  it('throws the server refusal verbatim, as a ServerRefusal, from every route added for the governance surfaces', async () => {
+    fetchMock.mockReturnValueOnce(errorResponse(403, 'Access denied: card card-1'));
+    const assignmentsFailure: unknown = await getAssignments('card-1', 'G1').catch((error: unknown) => error);
+    expect(assignmentsFailure).toBeInstanceOf(ServerRefusal);
+
+    fetchMock.mockReturnValueOnce(errorResponse(
+      409, 'This finding has already been ruled on; only a contest reopens it: finding-1',
+    ));
+    const adjudicateFailure: unknown = await adjudicateFinding('finding-1', {
+      gateId: 'G1', outcome: 'adopted', reason: 'Fair.', ruledByOrgAgentId: 'builder-1',
+    }).catch((error: unknown) => error);
+    expect(adjudicateFailure).toBeInstanceOf(ServerRefusal);
+    expect((adjudicateFailure as Error).message).toBe(
+      'This finding has already been ruled on; only a contest reopens it: finding-1',
+    );
+
+    fetchMock.mockReturnValueOnce(errorResponse(403, 'Only the owner may resolve a P0 escalation: agent-x may not'));
+    const resolveFailure: unknown = await resolveEscalation('escalation-1', 'Fixed.').catch((error: unknown) => error);
+    expect(resolveFailure).toBeInstanceOf(ServerRefusal);
+
+    fetchMock.mockReturnValueOnce(errorResponse(403, 'Access denied: this report is available to the owner only'));
+    const reportFailure: unknown = await getAdjudicationReport('2026-08-10').catch((error: unknown) => error);
+    expect(reportFailure).toBeInstanceOf(ServerRefusal);
   });
 
   it('throws the server refusal verbatim, as a ServerRefusal, not a generic failure message', async () => {
