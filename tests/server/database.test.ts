@@ -230,9 +230,16 @@ describe('orchestrator database', () => {
     expect(database.getAgent('gemini')?.acpCommand).toBe('npm:@google/gemini-cli');
     expect(database.getAgent('gemini')?.acpArgs).toEqual(['--acp']);
 
+    // Prime Agent also speaks ACP natively, and installs as a real PATH
+    // executable through its own installer rather than an npm package, so
+    // the command carries no `npm:` prefix (see the `prime` entry's comment
+    // in src/server/agent-catalog.ts).
+    expect(database.getAgent('prime')?.acpCommand).toBe('prime-agent');
+    expect(database.getAgent('prime')?.acpArgs).toEqual(['--mode', 'acp']);
+
     // No published ACP mode was confirmed for these. NULL is refused loudly by
     // acpSpawnOptions; a guessed flag would be the defect this work removes.
-    for (const id of ['kimi', 'hermes', 'prime']) {
+    for (const id of ['kimi', 'hermes']) {
       expect(database.getAgent(id)?.acpCommand, `${id} should have no ACP invocation`).toBeNull();
     }
 

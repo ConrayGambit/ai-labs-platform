@@ -81,19 +81,37 @@ export const BUILTIN_AGENTS = [
     env: {},
   },
   {
-    // Prime Intellect open-sourced Prime Agent on 6 August 2026 (MIT). It speaks
-    // ACP natively and its sessions are daemon-backed (survive disconnect,
-    // reattach with `prime-agent attach <agent>` / `--resume <path|id>`), but
-    // this task registers only the print-mode spawn invocation confirmed in
-    // the commit message. Choosing whether it connects over ACP instead
-    // (src/server/acp/) is a separate task with its own test surface.
+    // Prime Intellect open-sourced Prime Agent on 6 August 2026 (MIT). It is
+    // daemon-backed (reattach with `prime-agent attach <agent>` / `--resume
+    // <path|id>`); the print-mode command/args above are from an earlier
+    // task. acpCommand/acpArgs below are new, 2026-08-11, from v0.6.0's
+    // release notes, quoted verbatim: "Added `--mode acp`: Prime Agent now
+    // runs as an Agent Client Protocol agent over NDJSON on stdio, driving
+    // an `AgentConnection` in-process." packages/coding-agent/docs/usage.md
+    // — the CLI reference's own Modes table — has zero mentions of ACP
+    // anywhere on the page, checked in full and not just the table; the next
+    // person to check only that file will conclude this entry is wrong. It
+    // isn't: docs/acp.md (one line from the docs index; named by the release
+    // notes as where this lives) gives the invocation in full —
+    // `prime-agent --mode acp` — documented, just not on the page normally
+    // checked first. Plain command, not `npm:`: the installer README says it
+    // "downloads a versioned release, verifies its SHA-256 checksum,
+    // installs the `prime-agent` command" — a real PATH executable, not an
+    // npm shim — so resolveAcpLaunch's non-prefixed branch applies, same as
+    // gemini above. Unresolved, and not relied on: that repository's
+    // packages/coding-agent/package.json names the package
+    // `@earendil-works/pi-coding-agent` with bin `pi` (dist/bundle/cli.js),
+    // neither of which is `prime-agent`; could not square this with the
+    // installer, so the installer — what actually lands a binary on an
+    // operator's PATH — is treated as authoritative for the command name
+    // here.
     id: 'prime',
     name: 'Prime Agent',
     kind: 'custom',
     command: 'prime-agent',
     args: ['-p', '{prompt}'],
-    acpCommand: null,
-    acpArgs: [],
+    acpCommand: 'prime-agent',
+    acpArgs: ['--mode', 'acp'],
     outputFormat: 'text',
     resultField: null,
     coordinator: 0,

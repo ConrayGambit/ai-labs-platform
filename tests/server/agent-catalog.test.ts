@@ -21,8 +21,13 @@ describe('the agent catalog', () => {
     const byId = new Map(AGENT_CATALOG.map((entry) => [entry.id, entry]));
     expect(byId.get('claude')?.acpCommand).toBe('npm:@agentclientprotocol/claude-agent-acp');
     expect(byId.get('gemini')?.acpArgs).toEqual(['--acp']);
-    // The three with no confirmed ACP mode stay null rather than guessing.
-    for (const id of ['kimi', 'hermes', 'prime']) {
+    // Prime Agent speaks ACP natively via a plain, non-`npm:` command: it
+    // installs as a real PATH executable through its own installer, not an
+    // npm shim (see the `prime` entry's comment in agent-catalog.ts).
+    expect(byId.get('prime')?.acpCommand).toBe('prime-agent');
+    expect(byId.get('prime')?.acpArgs).toEqual(['--mode', 'acp']);
+    // The two with no confirmed ACP mode stay null rather than guessing.
+    for (const id of ['kimi', 'hermes']) {
       expect(byId.get(id)?.acpCommand, `${id}`).toBeNull();
     }
   });

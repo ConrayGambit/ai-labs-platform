@@ -1,7 +1,8 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { acpSpawnOptions, resolveAcpLaunch } from '../../src/server/acp/launch.js';
+import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 import type { AgentRuntime } from '../../src/shared/domain.js';
 
 /** A runtime with only the fields these functions read. */
@@ -111,5 +112,41 @@ describe('acpSpawnOptions', () => {
     expect(options.env).toEqual({ PROVIDER_TOKEN: 'resolved-at-launch' });
     expect(options.cwd).toBe('/tmp/project');
     delete process.env.ACP_LAUNCH_TEST_TOKEN;
+  });
+});
+
+describe('acpSpawnOptions for the registered prime runtime', () => {
+  // Prime Agent speaks ACP natively (`prime-agent --mode acp`), so the seeded
+  // registry row — not a hand-built fixture — is what must resolve cleanly
+  // here. Model: runtime-options.test.ts's `runtimes()` (DB-backed lookup).
+  let database: OrchestratorDatabase | undefined;
+  afterEach(() => {
+    database?.close();
+    database = undefined;
+  });
+
+  const primeRuntime = (): AgentRuntime => {
+    database = createDatabase(':memory:');
+    const prime = database.listAgents().find((agent) => agent.id === 'prime');
+    if (!prime) throw new Error('prime is not in the runtime registry');
+    return prime;
+  };
+
+  it('registers the ACP invocation confirmed in the v0.6.0 release notes: prime-agent --mode acp', () => {
+    const prime = primeRuntime();
+    expect(prime.acpCommand).toBe('prime-agent');
+    expect(prime.acpArgs).toEqual(['--mode', 'acp']);
+  });
+
+  it('resolves prime to a shell-free launch instead of refusing it', () => {
+    const prime = primeRuntime();
+    const options = acpSpawnOptions(prime, '/tmp/project');
+    // Shell-free: the plain command as-is (see resolveAcpLaunch above), not
+    // process.execPath resolving an npm: package's bin. Prime Agent installs
+    // through its own versioned installer as a real executable on PATH, so
+    // it takes the same non-prefixed path as `gemini` above — not the `npm:`
+    // workaround, which exists only for npm-shimmed CLIs.
+    expect(options.command).toBe('prime-agent');
+    expect(options.args).toEqual(['--mode', 'acp']);
   });
 });
