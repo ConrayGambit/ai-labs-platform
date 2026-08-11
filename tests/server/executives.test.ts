@@ -102,7 +102,7 @@ describe('prebuilt executive team', () => {
     const marketingOfficer = database.getOrgAgent('exec-cmo');
     expect(marketingOfficer).toMatchObject({
       runtimeId: 'codex',
-      model: 'gpt-5.1-codex',
+      model: 'gpt-5.6-terra',
       effort: 'medium',
     });
     expect(marketingOfficer?.skillIds).toEqual(['skill-taste', 'skill-awesome-design']);
