@@ -21,6 +21,7 @@ Core service (Fastify) ------------------------------------- SQLite
         +-- governance engine — roles, sealed reviews, findings, rulings,
         |                       override register, P0 escalation
         +-- rooms — per-card conversation an agent speaks into
+        +-- obsidian mirror — transactional outbox, replayed by a worker
         +-- run supervisor — one ACP session per run
                  |
                  |  session lifecycle; updates stored then fanned out; usage
@@ -99,6 +100,20 @@ Three records are not documentation about the work — they are conditions on it
 So a card closes on all of: an inspectable artifact, a complete handover, its reviews filed and adjudicated, and the owner's signature where the gate demands it. Closing is an advance whatever the card was doing beforehand — a blocked card is not exempt.
 
 None of these have an HTTP surface yet. They are written through the repository layer, and `/api/cards/:cardId/move` reads them to decide whether a move is allowed.
+
+## Export, and the checks around it
+
+**The Obsidian mirror** is opt-in and has no default path: a hardcoded vault location would be personal data in a published repository. Without one configured, events are still recorded durably and simply queue in the outbox.
+
+Export is a **transactional outbox** rather than a write at the point of the event. An event is enqueued in `platform-export-outbox` alongside the state change that produced it, and `platform-export-worker` drains the queue, so a mirror that is offline or slow delays an export and never loses one. A failed job is retried with backoff — one second, five, thirty, then five minutes — and the last failure is kept with its attempt count and next retry time, so a stuck export is a visible status rather than silence.
+
+What leaves the application is narrower than what is stored. `obsidian-exporter` projects each event through a **payload allowlist** keyed by event type — `VentureCreated` exports a name and a kind, `ApprovalDecided` an approval id and a status — so a field added to an event later does not silently start being mirrored. YAML scalars are quoted, and each note is written to a temporary path and renamed into place, so a reader never sees a half-written file.
+
+**The secret tripwire** (`secret-safety`) asserts six credential shapes against free-text input: assignments to `api_key`, `access_token`, `password`, `secret` or `authorization`; bearer tokens; `sk-`/`rk-`/`pk-` prefixes; GitHub `ghp_`-family and `github_pat_` tokens; AWS `AKIA` access-key ids; and PEM private-key headers. It is a tripwire for an obvious mistake, not a data-loss prevention system, and is written down as such so nobody comes to rely on it for the second thing.
+
+**The runtime health probe** (`runtime-health`) runs a provider's own version command with `shell: false`, a five-second timeout and an 8 KB output cap, and keeps the first non-empty line. An unreachable or misconfigured CLI is visible before a run depends on it.
+
+**The tenure sweep** (`tenure-sweep`) is what makes a recorded end date more than a promise. A pass every minute expires organizational agents whose tenure has ended. An agent that cannot be expired — today, one holding direct reports with no manager to re-parent them to — is reported as blocked rather than thrown, so one stuck record cannot stop the sweep for everyone else.
 
 ## Organizational model
 
