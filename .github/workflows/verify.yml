@@ -44,13 +44,12 @@ jobs:
       - run: npm run build
       - run: npm test
 
-  # Separate job, and deliberately not on windows-latest. gitleaks-action asks
-  # for gitleaks_<version>_windows_x64.tar.gz, but gitleaks publishes .zip for
-  # Windows and .tar.gz only for Linux, so the download 404s on every Windows
-  # run. That failed before the scan ran at all, which is the worst way for a
-  # secret scan to fail: red for a reason that has nothing to do with secrets,
-  # and eventually ignored. Scanning reads git history, so the platform it runs
-  # on is arbitrary.
+  # Separate job, and deliberately not on windows-latest. Scanning reads git
+  # history, so the platform it runs on is arbitrary — and gitleaks ships
+  # .tar.gz for Linux but .zip for Windows, which is precisely what broke this
+  # job while it ran there: the download 404'd before the scan started. A secret
+  # scan that fails red for a reason that has nothing to do with secrets is one
+  # that eventually gets ignored.
   secret-scan:
     runs-on: ubuntu-latest
     steps:
@@ -58,7 +57,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Secret scan (full history)
-        uses: gitleaks/gitleaks-action@v2
+      # The binary, not gitleaks-action. The action is a Node 20 action that the
+      # runner now forces onto Node 24, and all it wraps is the download below.
+      # Pinning it here means the version that scanned a commit is the version
+      # written in this file, and a bump is a reviewable diff rather than the
+      # scanner changing underneath an unchanged green badge.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: '8.30.1'
+        run: |
+          curl --fail --silent --show-error --location \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks version
+
+      # `git` scans the history through `git log -p`, which is why the checkout
+      # above is unshallow — a shallow one would scan a single commit and pass.
+      # `detect` did the same job but has been deprecated since 8.19. --redact
+      # keeps any finding out of a public log, and the exit code is 1 on a
+      # finding, which is what fails the job.
+      - name: Secret scan (full history)
+        run: ./gitleaks git --config .gitleaks.toml --redact --no-banner .
