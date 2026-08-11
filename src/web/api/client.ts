@@ -10,7 +10,7 @@
  * "request failed" message — losing the text here would make that impossible.
  */
 import type { StopReason } from '../../shared/acp.js';
-import type { GateReviewState, OverrideEntry } from '../../shared/governance.js';
+import type { CardSpecification, GateReviewState, OverrideEntry } from '../../shared/governance.js';
 import type { Room } from '../../shared/room.js';
 import type {
   BoardColumn,
@@ -147,6 +147,19 @@ export function moveCard(cardId: string, to: BoardColumnKey, position: number): 
 
 export function getReviewState(cardId: string, gateId: GateId): Promise<GateReviewState> {
   return getJson(`/api/cards/${cardId}/gates/${gateId}/review-state`);
+}
+
+/**
+ * Not in Task 5's set — added here. The card detail surface has to show the
+ * specification card's sections with any missing one named (this task's own
+ * brief), which is not part of `CardDetail` (`GET /api/cards/:cardId`); it is
+ * its own route, `GET /api/cards/:cardId/specification`
+ * (`src/server/governance-api.ts`), returning `CardSpecification | null`
+ * directly (null before any section has ever been written). Same one-route,
+ * one-wrapper shape as every function above.
+ */
+export function getSpecification(cardId: string): Promise<CardSpecification | null> {
+  return getJson(`/api/cards/${cardId}/specification`);
 }
 
 export async function getOverrides(cardId?: string): Promise<OverrideEntry[]> {
