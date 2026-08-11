@@ -19,6 +19,12 @@
   },
   // tests/web is already covered by tsconfig.json, which carries the JSX
   // settings. This config covers what nothing else did.
-  "include": ["src/**/*.ts", "tests/server/**/*.ts", "tests/scripts/**/*.ts", "tests/helpers/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "tests/server/**/*.ts",
+    "tests/scripts/**/*.ts",
+    "tests/helpers/**/*.ts",
+    "tests/docs/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
