@@ -308,3 +308,43 @@ button { color: inherit; }
   .dashboard-columns { grid-template-columns: 1fr; }
   .three-columns { grid-template-columns: 1fr; }
 }
+
+/* Card board — the governed board. Columns come from the server (a project's
+   gate ladder decides how many), so the grid is sized by auto-flow rather
+   than .board's fixed repeat(6, ...): same minmax(220px, 1fr) column and
+   12px gap, and the same .content-area:has() scroll trick, generalized to
+   any column count instead of a hardcoded six. */
+.card-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 12px; }
+.content-area:has(.card-board) { overflow-x: auto; }
+.card-board-column { padding: 10px; border-radius: 8px; background: rgba(255,255,255,.015); border: 1px solid var(--border-subtle); }
+.board-card-stack { display: grid; gap: 8px; }
+.board-card { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); text-align: left; cursor: pointer; }
+.board-card:hover { background: rgba(255,255,255,.04); }
+.board-card h3 { margin: 7px 0 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--secondary); }
+.board-card p { margin: 7px 0 0; font-size: 13px; line-height: 1.5; color: var(--secondary); }
+
+/* Card detail — the dialog opened from a board card. The shell (.dialog,
+   .dialog-heading, .icon-button), the field styling (.form-error,
+   .dialog-actions, .ghost-button, .primary-button) are all reused as-is;
+   only the content below the heading is new. */
+.card-detail-body { display: grid; gap: 24px; padding: 24px; }
+.detail-meta { display: flex; align-items: center; gap: 8px; }
+.detail-status-label { font-size: 12px; font-weight: 500; color: var(--muted); }
+.detail-section { display: grid; gap: 12px; }
+/* Label type (11px/500/0.06em/uppercase): section headings, field labels,
+   and specification section names all name what follows them. */
+.detail-heading, .field-label { margin: 0; color: var(--quiet); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+.detail-prose { margin: 0; color: var(--secondary); font-size: 13px; line-height: 1.5; }
+.detail-empty { margin: 0; color: var(--quiet); font-size: 13px; line-height: 1.5; }
+.detail-field { display: grid; gap: 8px; }
+.detail-field textarea, .detail-field select { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; outline: none; background: rgba(255,255,255,.025); color: var(--secondary); font-size: 12px; resize: vertical; }
+.detail-field textarea:focus, .detail-field select:focus { border-color: rgba(113,112,255,.7); box-shadow: 0 0 0 3px rgba(113,112,255,.09); }
+.card-pill { display: inline-block; padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,.025); color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; white-space: nowrap; }
+.spec-list { display: grid; gap: 8px; }
+.spec-row { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.spec-row dd { margin: 0; color: var(--secondary); font-size: 13px; line-height: 1.5; }
+.activity-list, .artifact-list { display: grid; gap: 8px; }
+.activity-row, .artifact-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.activity-detail, .artifact-label { color: var(--secondary); font-size: 13px; }
+.activity-meta { margin-left: auto; color: var(--quiet); font-size: 11px; }
+.artifact-location { margin-left: auto; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
