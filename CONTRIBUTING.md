@@ -116,7 +116,10 @@ Pull requests are reviewed against a written gate. An external contribution ente
 ## Commits
 
 - Small and coherent — one logical change each.
-- Sign off with the Developer Certificate of Origin: `git commit -s`.
+- No sign-off trailer is required. Section 5 of [LICENSE](LICENSE) already places a contribution
+  submitted for inclusion under the same licence unless you state otherwise, so a per-commit
+  certification would restate it — and a rule nothing checks, that no commit in this repository has
+  ever followed, is worse than no rule: it teaches contributors which parts of this file to skim.
 - Never `--no-verify`. If a hook fails, fix the cause.
 
 ## Adding a dependency
