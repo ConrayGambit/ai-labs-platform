@@ -10,6 +10,7 @@ import {
   type Finding,
   type FindingInput,
   type AdjudicationReport,
+  type GateSealState,
   type OverrideEntry,
   type Review,
   type ReviewAssignment,
@@ -103,6 +104,13 @@ export interface GovernanceRepository {
    * rule, the adjudication gate and the advancement rule all read one answer.
    */
   requiredReviewers(cardId: string, gateId: GateId): number;
+  /**
+   * The seal state of a gate, derived from the same inputs the visibility rule
+   * uses. It lives here rather than in the API because the deadline rule below
+   * — every outstanding reviewer must be out of time, not merely one — would
+   * otherwise exist in two places.
+   */
+  getGateSealState(cardId: string, gateId: GateId): GateSealState;
   /**
    * Adds an entry to the override register. The ONLY writer.
    *
@@ -319,6 +327,39 @@ export function createGovernanceRepository(connection: Database.Database): Gover
     return { id: row.id, model: row.model, runtimeId: row.runtime_id };
   };
 
+  /**
+   * Whether this agent may hold any role on this card at all.
+   *
+   * Assignment read only id, model and runtime, so a retired agent could be
+   * given sole write authority over a card and an agent from an unrelated
+   * venture could be made its reviewer. Both are the deny-by-default posture
+   * the rest of the platform holds, applied where the authority is granted.
+   *
+   * A null venture is portfolio-wide — the executives — and is allowed
+   * anywhere; only a DIFFERENT venture is refused.
+   */
+  const assertAgentMayHoldRole = (orgAgentId: string, cardId: string): void => {
+    const agent = connection
+      .prepare('SELECT enabled, venture_id FROM org_agents WHERE id = ?')
+      .get(orgAgentId) as { enabled: number; venture_id: string | null } | undefined;
+    if (!agent) throw new Error(`Organizational agent not found: ${orgAgentId}`);
+    if (agent.enabled !== 1) {
+      throw new Error(`${orgAgentId} is disabled and may not hold a role on a card`);
+    }
+    if (agent.venture_id) {
+      const venture = connection
+        .prepare(
+          `SELECT p.venture_id AS venture FROM cards c
+             JOIN platform_projects p ON p.id = c.project_id
+            WHERE c.id = ?`,
+        )
+        .get(cardId) as { venture: string } | undefined;
+      if (venture && venture.venture !== agent.venture_id) {
+        throw new Error(`${orgAgentId} belongs to another venture and may not hold a role here`);
+      }
+    }
+  };
+
   const getBuilder = (cardId: string, gateId: GateId): ReviewAssignment | null => {
     const row = selectBuilder.get(cardId, gateId) as AssignmentRow | undefined;
     return row ? mapAssignment(row) : null;
@@ -503,6 +544,7 @@ export function createGovernanceRepository(connection: Database.Database): Gover
           )
           .get(input.cardId) as { ladder: string | null } | undefined;
         if (!ladderId) throw new Error(`Card not found: ${input.cardId}`);
+        assertAgentMayHoldRole(input.orgAgentId, input.cardId);
         const ladder = getLadder(ladderId.ladder ?? 'product');
         if (!ladder.gates.some((gate) => gate.id === input.gateId)) {
           throw new Error(
@@ -571,6 +613,23 @@ export function createGovernanceRepository(connection: Database.Database): Gover
           throw new Error(
             `${input.reviewerOrgAgentId} is not a reviewer on ${input.cardId} at ${input.gateId}`,
           );
+        }
+        /*
+         * Model diversity is a standing property, not a moment-of-assignment
+         * one (spec 20.3). Checking it only at assignment let setTuning point a
+         * reviewer at the builder's model afterwards, and the review still
+         * counted — the reviewer marking the builder's work with the builder's
+         * model, which is the arrangement the rule exists to prevent.
+         */
+        const builderNow = getBuilder(input.cardId, input.gateId);
+        if (builderNow) {
+          const eligibility = canReview(
+            identityOf(input.reviewerOrgAgentId),
+            identityOf(builderNow.orgAgentId),
+          );
+          if (!eligibility.allowed) {
+            throw new Error(`${eligibility.reason} (checked again when the review was filed)`);
+          }
         }
         assertChecklistAnswered(input.checklist);
         for (const finding of input.findings) assertFindingIsActionable(finding);
@@ -692,6 +751,37 @@ export function createGovernanceRepository(connection: Database.Database): Gover
         now,
         deadlineAt,
       }));
+    },
+
+    getGateSealState(cardId, gateId) {
+      const required = requiredReviewersFor(cardId, gateId);
+      const current = listCurrentReviews(cardId, gateId);
+      const filedReviewerIds = [...new Set(current.map((review) => review.reviewerOrgAgentId))];
+      const filedIds = new Set(filedReviewerIds);
+      const stillOut = listReviewers(cardId, gateId)
+        .filter((assignment) => !filedIds.has(assignment.orgAgentId));
+      const outstandingDeadlines = stillOut
+        .map((assignment) => assignment.reviewDeadlineAt)
+        .filter((deadline): deadline is string => deadline !== null);
+      // Every outstanding reviewer must be out of time, not merely one of
+      // them — the same rule listVisibleReviews applies below.
+      const deadlineAt = stillOut.length > 0 && outstandingDeadlines.length === stillOut.length
+        ? outstandingDeadlines.reduce((latest, deadline) => (deadline > latest ? deadline : latest))
+        : null;
+      const now = new Date().toISOString();
+      const lapsed = deadlineAt !== null && now > deadlineAt;
+      const sealed = required >= 2 && filedReviewerIds.length < required && !lapsed;
+      return {
+        cardId,
+        gateId,
+        requiredReviewers: required,
+        filedReviewerIds,
+        deadlineAt,
+        sealed,
+        sealReason: sealed
+          ? `${filedReviewerIds.length} of ${required} reviewers have filed.`
+          : null,
+      };
     },
 
     setReviewDeadline(input) {

@@ -259,6 +259,21 @@ describe('filing a review', () => {
     expect(database!.governance.listCurrentReviews(card.id, 'G1')).toHaveLength(2);
   });
 
+  // Finding 6: model diversity was checked when the role was assigned and never
+  // again, so setTuning could point a reviewer at the builder's model
+  // afterwards and the review still counted. Spec 20.3 states a standing
+  // property, not a moment-of-assignment one.
+  it('REFUSES a review from a reviewer whose model was later changed to the builder model', () => {
+    const { card, builder, reviewer } = seed();
+    const builderModel = database!.getOrgAgent(builder.id)!.model!;
+    database!.org.setTuning(reviewer.id, { model: builderModel });
+
+    expect(() => service!.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
+      verdict: 'approve', checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
+    })).toThrow(/same model/i);
+  });
+
   it('does not mix a G1 review into G2', () => {
     const { card, reviewer } = seed();
     service!.fileReview({

@@ -180,7 +180,19 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         }
 
         const required = database.governance.requiredReviewers(input.cardId, input.gateId);
+        const assigned = database.governance.listReviewers(input.cardId, input.gateId).length;
         const filed = database.governance.listCurrentReviews(input.cardId, input.gateId).length;
+        if (assigned < required) {
+          /*
+           * A gate wanting more reviewers than it has can never be satisfied,
+           * and reporting only "1 of 2 filed" points at the reviewer who did
+           * their job instead of the staffing that makes it impossible.
+           */
+          throw new Error(
+            `Gate ${input.gateId} needs ${required} reviewers and has ${assigned} assigned; ` +
+            'assign another before adjudicating',
+          );
+        }
         if (filed < required) {
           throw new Error(
             `All reviews must be filed before adjudication: ${filed} of ${required} at ${input.gateId}`,
@@ -191,6 +203,21 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         const rulings = listRulings(input.findingId);
         if (rulings.some((ruling) => ruling.isFinal)) {
           throw new Error(`This finding has a final ruling and cannot be reopened: ${input.findingId}`);
+        }
+        const wasContested = connection
+          .prepare('SELECT 1 FROM finding_contests WHERE finding_id = ?')
+          .get(input.findingId) !== undefined;
+        if (rulings.length > 0 && !wasContested) {
+          /*
+           * Spec 20.4.3 contemplates A ruling, with 20.4.7's re-ruling being
+           * the exception a contest earns. Blocking only on isFinal let the
+           * builder revise indefinitely — adopted, then overridden, then
+           * deferred, each appending a register entry — so "the builder rules"
+           * quietly became "the builder keeps ruling".
+           */
+          throw new Error(
+            `This finding has already been ruled on; only a contest reopens it: ${input.findingId}`,
+          );
         }
         if (isOverride(input.outcome) && !canOverride(finding.priority)) {
           // Not a policy the builder may argue with. It is why the ladder has a
@@ -214,10 +241,7 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         }
 
         // A re-ruling only happens after a contest, and a contested finding is
-        // ruled once more and no further.
-        const contested = connection
-          .prepare('SELECT 1 FROM finding_contests WHERE finding_id = ?')
-          .get(input.findingId) !== undefined;
+        // ruled once more and no further. Same question as above, one answer.
 
         const id = randomUUID();
         connection.prepare(`
@@ -236,7 +260,7 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
           reason: input.reason,
           nextStep: input.nextStep ?? null,
           residualRisk: input.residualRisk ?? null,
-          isFinal: contested ? 1 : 0,
+          isFinal: wasContested ? 1 : 0,
           ruledAt: new Date().toISOString(),
           sequence: rulings.length,
         });
@@ -340,6 +364,18 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         if (!existing) throw new Error(`Escalation not found: ${input.escalationId}`);
         if (existing.status === 'resolved') {
           throw new Error(`This escalation is already resolved: ${input.escalationId}`);
+        }
+        /*
+         * A P0 goes to the owner and the owner resolves it (spec 20.1). The
+         * service trusted whoever it was handed, and the plan put this check on
+         * a route that does not exist yet — so anything calling the service
+         * directly could clear a P0 on the owner's behalf.
+         */
+        const resolver = database.identity.getUser(input.resolvedByUserId);
+        if (!resolver || resolver.role !== 'owner') {
+          throw new Error(
+            `Only the owner may resolve a P0 escalation: ${input.resolvedByUserId} may not`,
+          );
         }
         connection.prepare(`
           UPDATE p0_escalations SET

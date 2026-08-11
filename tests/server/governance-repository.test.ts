@@ -137,6 +137,51 @@ describe('roles on a card at a gate', () => {
     })).not.toThrow();
   });
 
+  // Finding 11: assignment read only id, model and runtime, so a retired agent
+  // could be given sole write authority over a card and an agent from an
+  // unrelated venture could be made its reviewer.
+  it('REFUSES a disabled agent, and one from another venture', () => {
+    database = createDatabase(':memory:');
+    const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
+    const ours = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'Ours', kind: 'research', mission: 'M.',
+    });
+    const theirs = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'Theirs', kind: 'research', mission: 'M.',
+    });
+    const project = database.platform.createProject({
+      ventureId: ours.id, name: 'P', objective: 'O.', successCriteria: ['C'],
+    });
+    const card = database.work.createCard({ projectId: project.id, title: 'A card' });
+    const make = (name: string, model: string) => database!.createOrgAgent({
+      name, jobTitle: 'S', department: 'D', jobFunction: 'F', responsibilities: 'R',
+      runtimeId: database!.createAgent({
+        name: `rt-${model}`, command: `rt-${model}`, argsTemplate: ['{prompt}'],
+        promptTransport: 'argument', outputFormat: 'text',
+        versionArgs: ['--version'], timeoutMs: 120_000,
+      }).id,
+      model,
+    });
+    const retired = make('Retired', 'm1');
+    const outsider = make('Outsider', 'm2');
+    const ourAgent = make('Ours', 'm3');
+    database.org.assignAgentToVenture(outsider.id, theirs.id, null);
+    database.org.assignAgentToVenture(ourAgent.id, ours.id, null);
+    // A retired agent, as expireAgent leaves one: recorded, not deleted.
+    database.connection.prepare('UPDATE org_agents SET enabled = 0 WHERE id = ?').run(retired.id);
+
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: retired.id,
+    })).toThrow(/disabled/i);
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: outsider.id,
+    })).toThrow(/another venture/i);
+    // An agent of this venture is fine, as is a portfolio-wide one with none.
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: ourAgent.id,
+    })).not.toThrow();
+  });
+
   it('allows a different builder at a different gate on the same card', () => {
     const { card, builder, otherModel } = seed();
     database!.governance.assignRole({
