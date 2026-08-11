@@ -15,6 +15,8 @@ function fakeRuntime(argsTemplate: string[]): AgentRuntime {
     kind: 'custom',
     command: process.execPath,
     argsTemplate: [fixture, ...argsTemplate],
+    acpCommand: null,
+    acpArgs: [],
     promptTransport: 'argument',
     outputFormat: 'text',
     resultField: null,

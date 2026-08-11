@@ -180,4 +180,33 @@ describe('orchestrator database', () => {
     expect(database.getRun(run.id)).toMatchObject({ id: run.id, status: 'completed' });
     expect(database.listRunMessages(run.id)).toEqual([message]);
   });
+
+  it('round-trips an ACP invocation on a custom runtime', () => {
+    database = createDatabase(':memory:');
+
+    const runtime = database.createAgent({
+      name: 'Local ACP Bridge',
+      command: 'local-agent',
+      argsTemplate: ['run', '--prompt', '{prompt}'],
+      acpCommand: 'npm:@example/some-acp-adapter',
+      acpArgs: ['--stdio'],
+    });
+
+    expect(runtime.acpCommand).toBe('npm:@example/some-acp-adapter');
+    expect(runtime.acpArgs).toEqual(['--stdio']);
+    expect(database.getAgent(runtime.id)).toEqual(runtime);
+  });
+
+  it('defaults a runtime registered without an ACP invocation to none', () => {
+    database = createDatabase(':memory:');
+
+    const runtime = database.createAgent({
+      name: 'Single Shot Only',
+      command: 'local-agent',
+      argsTemplate: ['{prompt}'],
+    });
+
+    expect(runtime.acpCommand).toBeNull();
+    expect(runtime.acpArgs).toEqual([]);
+  });
 });

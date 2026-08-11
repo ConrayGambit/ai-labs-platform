@@ -53,6 +53,8 @@ interface AgentRow {
   kind: AgentKind;
   command: string;
   args_json: string;
+  acp_command: string | null;
+  acp_args_json: string;
   prompt_transport: PromptTransport;
   output_format: AgentOutputFormat;
   result_field: string | null;
@@ -689,6 +691,8 @@ function mapAgent(row: AgentRow): AgentRuntime {
     kind: row.kind,
     command: row.command,
     argsTemplate: JSON.parse(row.args_json) as string[],
+    acpCommand: row.acp_command,
+    acpArgs: JSON.parse(row.acp_args_json || '[]') as string[],
     promptTransport: row.prompt_transport,
     outputFormat: row.output_format,
     resultField: row.result_field,
@@ -1151,6 +1155,8 @@ export function createDatabase(filename: string): OrchestratorDatabase {
         kind: 'custom',
         command: input.command,
         argsTemplate: input.argsTemplate,
+        acpCommand: input.acpCommand ?? null,
+        acpArgs: input.acpArgs ?? [],
         promptTransport: input.promptTransport ?? 'argument',
         outputFormat: input.outputFormat ?? 'text',
         resultField: input.resultField ?? null,
@@ -1167,10 +1173,11 @@ export function createDatabase(filename: string): OrchestratorDatabase {
       connection
         .prepare(`
           INSERT INTO agents (
-            id, name, kind, command, args_json, prompt_transport, output_format,
+            id, name, kind, command, args_json, acp_command, acp_args_json,
+            prompt_transport, output_format,
             result_field, version_args_json, option_templates_json, option_values_json,
             env_json, enabled, is_coordinator, timeout_ms, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
         `)
         .run(
           runtime.id,
@@ -1178,6 +1185,8 @@ export function createDatabase(filename: string): OrchestratorDatabase {
           runtime.kind,
           runtime.command,
           JSON.stringify(runtime.argsTemplate),
+          runtime.acpCommand,
+          JSON.stringify(runtime.acpArgs),
           runtime.promptTransport,
           runtime.outputFormat,
           runtime.resultField,
