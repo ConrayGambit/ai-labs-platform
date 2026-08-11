@@ -84,6 +84,14 @@ export interface GovernanceRepository {
   insertReviewRecord(input: FileReviewInput): Review;
   getReview(reviewId: string): Review | null;
   /**
+   * The id of the card a finding belongs to, or null if the finding does not
+   * exist. A query over data this repository already owns, not a rule — a
+   * route keyed by a finding id resolves its card here and checks access the
+   * same way a route keyed by a card id already does, so an unknown finding
+   * and one whose card is unreachable read the same.
+   */
+  getFindingCardId(findingId: string): string | null;
+  /**
    * Every review ever filed at this gate, superseded ones included. The record
    * of what was believed at the time is itself evidence (spec 20.5).
    */
@@ -720,6 +728,17 @@ export function createGovernanceRepository(connection: Database.Database): Gover
     getReview(reviewId) {
       const row = selectReview.get(reviewId) as ReviewRow | undefined;
       return row ? mapReview(row, findingsFor(row.id)) : null;
+    },
+
+    getFindingCardId(findingId) {
+      const row = connection
+        .prepare(
+          `SELECT r.card_id AS cardId FROM review_findings f
+             JOIN reviews r ON r.id = f.review_id
+            WHERE f.id = ?`,
+        )
+        .get(findingId) as { cardId: string } | undefined;
+      return row?.cardId ?? null;
     },
 
     listReviews: (cardId, gateId) =>

@@ -30,7 +30,6 @@ const fileReviewSchema = z.object({
 });
 
 const adjudicateSchema = z.object({
-  cardId: z.string().trim().min(1),
   gateId: gateIdSchema,
   outcome: z.enum(['adopted', 'deferred', 'overridden']),
   reason: z.string().trim().min(1).max(5_000),
@@ -78,6 +77,25 @@ export function registerGovernanceApi(
     if (!project) throw new Error(`Access denied: card ${cardId}`);
     database.identity.assertVentureAccess(currentUserId, project.ventureId);
     return card;
+  };
+
+  /**
+   * The same check as requireCard, one entity up the chain, for a route
+   * keyed by a finding id rather than a card id. An unknown finding and a
+   * real one whose card this actor cannot reach must read identically — not
+   * just the same status, the same message — or the wording of the refusal
+   * becomes a way to tell "no such finding" from "finding exists, wrong
+   * venture", which is exactly what discovers which findings exist.
+   */
+  const requireFindingCard = (findingId: string): string => {
+    const cardId = database.governance.getFindingCardId(findingId);
+    if (!cardId) throw new Error(`Access denied: finding ${findingId}`);
+    try {
+      requireCard(cardId);
+    } catch {
+      throw new Error(`Access denied: finding ${findingId}`);
+    }
+    return cardId;
   };
 
   app.get<{ Params: { cardId: string; gateId: string } }>(
@@ -154,12 +172,21 @@ export function registerGovernanceApi(
   app.post<{ Params: { findingId: string } }>(
     '/api/findings/:findingId/adjudicate',
     async (request) => {
+      /*
+       * cardId is resolved from the finding, not read from the body: the
+       * body no longer carries one at all. Accepting a client-supplied
+       * cardId here would let it diverge from the finding actually being
+       * ruled on — the access check would verify one card while adjudicate
+       * looked up the builder on whatever card the client named instead.
+       */
+      const cardId = requireFindingCard(request.params.findingId);
       const input = adjudicateSchema.parse(request.body);
       // ruledByOrgAgentId is the builder org agent ruling on the finding, not
       // the connected actor — the same reasoning as reviewerOrgAgentId above.
       return governanceService.adjudicate({
         ...input,
         gateId: input.gateId as GateId,
+        cardId,
         findingId: request.params.findingId,
       });
     },
@@ -168,6 +195,7 @@ export function registerGovernanceApi(
   app.post<{ Params: { findingId: string } }>(
     '/api/findings/:findingId/contest',
     async (request) => {
+      requireFindingCard(request.params.findingId);
       const input = contestSchema.parse(request.body);
       // contestedByOrgAgentId is the reviewer contesting the ruling, not the
       // connected actor — the same reasoning as reviewerOrgAgentId above.
