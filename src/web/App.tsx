@@ -91,7 +91,11 @@ function formatRunTime(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
 
-function RuntimeMark({ runtimeId }: { runtimeId: string }) {
+/** Null renders a distinct, deliberately non-alphabetic mark — this agent names no provider at all. */
+function RuntimeMark({ runtimeId }: { runtimeId: string | null }) {
+  if (runtimeId === null) {
+    return <span className="runtime-mark runtime-none" title="No runtime assigned">–</span>;
+  }
   return <span className={`runtime-mark runtime-${runtimeId}`}>{runtimeId.slice(0, 1).toUpperCase()}</span>;
 }
 
@@ -109,7 +113,7 @@ function OrgCard({
   depth: number;
 }) {
   const manager = agent.managerId ? agentsById.get(agent.managerId) : null;
-  const runtime = runtimesById.get(agent.runtimeId);
+  const runtime = agent.runtimeId ? runtimesById.get(agent.runtimeId) : undefined;
   const tuning = [agent.model, agent.speed, agent.effort].filter(Boolean) as string[];
   return (
     <article className="org-card" style={{ '--depth': depth } as React.CSSProperties}>
@@ -125,7 +129,7 @@ function OrgCard({
       <p className="agent-function">{agent.jobFunction}</p>
       <div className="org-meta">
         <span>{agent.department}</span>
-        <span>{runtime?.name ?? agent.runtimeId}</span>
+        <span>{runtime?.name ?? agent.runtimeId ?? 'No runtime assigned'}</span>
         <span>{manager ? `Reports to ${manager.name}` : 'Organization root'}</span>
         {agent.canDelegate && <span>Can delegate</span>}
         {tuning.map((value) => <span className="tuning-pill" key={value}>{value}</span>)}

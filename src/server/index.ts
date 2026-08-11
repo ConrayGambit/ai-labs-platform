@@ -8,7 +8,7 @@ import type { AgentInvoker } from './council.js';
 import { createDatabase } from './database.js';
 import { createObsidianExporter } from './obsidian-exporter.js';
 import { createRunSupervisor } from './run-supervisor.js';
-import { acpSpawnOptions } from './acp/launch.js';
+import { agentSpawnOptions } from './acp/launch.js';
 import { resolveAiLabsPaths } from './paths.js';
 import { startTenureSweep } from './tenure-sweep.js';
 
@@ -62,10 +62,12 @@ const currentUserId = process.env.AI_LABS_OWNER_USER_ID ?? 'owner';
  * are different launches of the same provider and are not interchangeable:
  * the single-shot form carries a `{prompt}` placeholder that only
  * `runAgentProcess` substitutes, and a session sends its prompt in
- * `session/prompt` with no prompt in argv at all. A runtime with no ACP
- * invocation is refused here rather than launched — spawning its single-shot
- * command would make a billed call on a literal `{prompt}` and then wait for
- * JSON-RPC from a process that does not speak it.
+ * `session/prompt` with no prompt in argv at all. An agent with no runtime, a
+ * runtime that no longer exists, a disabled runtime, and a runtime with no ACP
+ * invocation are all refused here rather than launched — spawning a
+ * single-shot command instead would make a billed call on a literal
+ * `{prompt}` and then wait for JSON-RPC from a process that does not speak it.
+ * See `agentSpawnOptions` for the four refusals, in order.
  *
  * `${VAR}` environment references resolve at the moment of spawn, through the
  * same helper every other runtime launch uses. AI Labs never holds a model
@@ -73,11 +75,7 @@ const currentUserId = process.env.AI_LABS_OWNER_USER_ID ?? 'owner';
  */
 const supervisor = createRunSupervisor({
   database,
-  spawnFor: (agent) => {
-    const runtime = database.getAgent(agent.runtimeId);
-    if (!runtime) throw new Error(`Runtime not found for agent ${agent.id}: ${agent.runtimeId}`);
-    return acpSpawnOptions(runtime, process.cwd());
-  },
+  spawnFor: (agent) => agentSpawnOptions(agent, database, process.cwd()),
 });
 
 const app = buildApp({

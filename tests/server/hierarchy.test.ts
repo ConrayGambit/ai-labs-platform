@@ -98,4 +98,44 @@ describe('hierarchical orchestration', () => {
       database.close();
     }
   });
+
+  it('REFUSES an agent with no runtime assigned, before invoking anything', async () => {
+    const database = createDatabase(':memory:');
+    const project = database.createProject({ name: 'Hierarchy Guard', path: '/work/hierarchy-guard' });
+    const task = database.createTask({
+      projectId: project.id,
+      title: 'Do the work',
+      status: 'ready',
+    });
+    const root = database.createOrgAgent({
+      name: 'Unassigned',
+      jobTitle: 'Specialist',
+      department: 'Research',
+      jobFunction: 'Does the work.',
+      responsibilities: 'Work.',
+      runtimeId: 'hermes',
+    });
+    database.assignOrgAgentToProject(project.id, root.id);
+    // Nothing in the domain layer produces this state yet (creation still
+    // requires a runtime); simulated directly, the same way the governance
+    // tests simulate a retired agent.
+    database.connection.prepare('UPDATE org_agents SET runtime_id = NULL WHERE id = ?').run(root.id);
+
+    let invoked = false;
+    const invoke: AgentInvoker = async () => {
+      invoked = true;
+      return 'unreachable';
+    };
+
+    try {
+      const orchestrator = createHierarchyOrchestrator({ database, invoke });
+      await expect(
+        orchestrator.run({ taskId: task.id, rootOrgAgentId: root.id }),
+      ).rejects.toThrow(/no runtime/i);
+      // Refused before anything ran — not merely before the run was marked done.
+      expect(invoked).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
 });

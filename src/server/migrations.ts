@@ -9,6 +9,28 @@ export interface Migration {
    * identity: it is what gets checksummed.
    */
   sql: string;
+  /**
+   * True when this migration rebuilds a table that other tables reference by
+   * foreign key.
+   *
+   * SQLite has no `ALTER TABLE ... DROP NOT NULL` or any other way to loosen a
+   * column constraint in place; the only path is create-copy-drop-rename. Under
+   * foreign key enforcement, the DROP in that sequence performs an implicit
+   * `DELETE FROM` of every row in the table being replaced, which fails the
+   * moment another table holds a NOT NULL reference to one of them — the same
+   * wall the note on `0005-owner-user` above describes hitting from the
+   * opposite direction (adding a constraint rather than loosening one).
+   * `PRAGMA foreign_keys` cannot fix this from inside a migration's own SQL
+   * either: it is a documented no-op once a transaction is already open, and
+   * `applyMigrations` opens one before running any migration's `sql`.
+   *
+   * A migration that sets this is run outside that ordinary transaction
+   * instead: enforcement is disabled before its transaction opens, `PRAGMA
+   * foreign_key_check` must come back empty before it commits, and enforcement
+   * is restored after — the rebuild procedure SQLite's own documentation
+   * describes, run at the one boundary this framework can actually perform it.
+   */
+  rebuildsReferencedTable?: boolean;
 }
 
 // A migration is SQL and nothing else. An escape hatch for arbitrary code was
@@ -33,6 +55,45 @@ export interface Migration {
  */
 function checksum(migration: Migration): string {
   return createHash('sha256').update(migration.sql.replace(/\s+/g, ' ').trim()).digest('hex');
+}
+
+/**
+ * Applies one migration that needs foreign key enforcement disabled for a
+ * table rebuild. See `Migration.rebuildsReferencedTable` for why this cannot
+ * be the ordinary BEGIN-exec-COMMIT every other migration uses.
+ *
+ * Only toggles the pragma if it was actually on: a caller that never enabled
+ * enforcement (several tests construct a bare connection and call
+ * `applyMigrations` directly, never setting the pragma at all) is left exactly
+ * as found rather than this being the one place that turns it on.
+ */
+function applyTableRebuildMigration(
+  connection: Database.Database,
+  migration: Migration,
+  digest: string,
+  record: Database.Statement,
+): void {
+  const wasEnabled = connection.pragma('foreign_keys', { simple: true }) === 1;
+  if (wasEnabled) connection.pragma('foreign_keys = OFF');
+  try {
+    connection.transaction(() => {
+      connection.exec(migration.sql);
+      // Required, not advisory: enforcement was off for the statements above,
+      // so nothing has yet checked that the rebuilt table still satisfies every
+      // foreign key that names it. A rebuild that silently dropped or
+      // mismatched a referencing row would otherwise commit clean and surface
+      // as a dangling reference only much later, far from its cause.
+      const violations = connection.pragma('foreign_key_check') as unknown[];
+      if (violations.length > 0) {
+        throw new Error(
+          `Migration ${migration.id} left dangling foreign keys: ${JSON.stringify(violations)}`,
+        );
+      }
+      record.run(migration.id, digest, new Date().toISOString());
+    })();
+  } finally {
+    if (wasEnabled) connection.pragma('foreign_keys = ON');
+  }
 }
 
 /**
@@ -69,10 +130,14 @@ export function applyMigrations(
       }
       continue;
     }
-    connection.transaction(() => {
-      connection.exec(migration.sql);
-      record.run(migration.id, digest, new Date().toISOString());
-    })();
+    if (migration.rebuildsReferencedTable) {
+      applyTableRebuildMigration(connection, migration, digest, record);
+    } else {
+      connection.transaction(() => {
+        connection.exec(migration.sql);
+        record.run(migration.id, digest, new Date().toISOString());
+      })();
+    }
     applied.push(migration.id);
   }
   return applied;
@@ -875,6 +940,83 @@ export const MIGRATIONS: Migration[] = [
     sql: `
         ALTER TABLE agents ADD COLUMN acp_command TEXT;
         ALTER TABLE agents ADD COLUMN acp_args_json TEXT NOT NULL DEFAULT '[]';
+      `,
+  },
+  {
+    id: '0023-optional-runtime',
+    // The model powers an employee; it does not define that employee's
+    // identity (PRODUCT.md). `runtime_id` was `NOT NULL`, so an organizational
+    // agent could not exist without a provider, and every agent naming a
+    // runtime blocked its removal — the same class of defect spec 4.1.1 already
+    // caught for `manager_id`, applied here.
+    //
+    // SQLite cannot drop a NOT NULL constraint with ALTER TABLE; this rebuilds
+    // the table (see `Migration.rebuildsReferencedTable`, which this sets).
+    // Every other column, default, CHECK and index is carried over unchanged —
+    // only `runtime_id` loses NOT NULL. `runtime_id`'s own `REFERENCES
+    // agents(id)` is kept as-is: a NULL foreign key value is exempt from
+    // foreign key checking, so no ON DELETE clause is needed for the case this
+    // migration adds.
+    //
+    // This does not touch what a NULL runtime means at read time, and it adds
+    // no way to produce one — creation still requires a runtime, unchanged.
+    // That is a behavior change, made elsewhere, reviewed on its own.
+    rebuildsReferencedTable: true,
+    sql: `
+        CREATE TABLE org_agents_new (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL DEFAULT 'default-org',
+          name TEXT NOT NULL,
+          job_title TEXT NOT NULL,
+          department TEXT NOT NULL,
+          job_function TEXT NOT NULL,
+          responsibilities TEXT NOT NULL,
+          instructions TEXT NOT NULL DEFAULT '',
+          runtime_id TEXT REFERENCES agents(id),
+          manager_id TEXT REFERENCES org_agents(id) ON DELETE SET NULL,
+          authority_level INTEGER NOT NULL DEFAULT 50 CHECK(authority_level BETWEEN 0 AND 100),
+          can_delegate INTEGER NOT NULL DEFAULT 0,
+          model TEXT,
+          speed TEXT,
+          effort TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          venture_id TEXT,
+          department_id TEXT REFERENCES departments(id),
+          tenure TEXT NOT NULL DEFAULT 'hired'
+            CHECK(tenure IN ('permanent', 'hired', 'temporary')),
+          expiry_kind TEXT,
+          expiry_at TEXT,
+          dedication TEXT NOT NULL DEFAULT 'shared'
+            CHECK(dedication IN ('shared', 'dedicated')),
+          dedication_reason TEXT,
+          doctrine_edited_at TEXT,
+          tuning_edited_at TEXT,
+          reports_to_user_id TEXT REFERENCES users(id),
+          CHECK(manager_id IS NULL OR manager_id <> id)
+        );
+
+        INSERT INTO org_agents_new (
+          id, organization_id, name, job_title, department, job_function, responsibilities,
+          instructions, runtime_id, manager_id, authority_level, can_delegate,
+          model, speed, effort, enabled, created_at, updated_at,
+          venture_id, department_id, tenure, expiry_kind, expiry_at,
+          dedication, dedication_reason, doctrine_edited_at, tuning_edited_at, reports_to_user_id
+        )
+        SELECT
+          id, organization_id, name, job_title, department, job_function, responsibilities,
+          instructions, runtime_id, manager_id, authority_level, can_delegate,
+          model, speed, effort, enabled, created_at, updated_at,
+          venture_id, department_id, tenure, expiry_kind, expiry_at,
+          dedication, dedication_reason, doctrine_edited_at, tuning_edited_at, reports_to_user_id
+        FROM org_agents;
+
+        DROP TABLE org_agents;
+        ALTER TABLE org_agents_new RENAME TO org_agents;
+
+        CREATE INDEX IF NOT EXISTS org_agents_manager ON org_agents(manager_id);
+        CREATE INDEX IF NOT EXISTS org_agents_venture ON org_agents(venture_id);
       `,
   },
 ];

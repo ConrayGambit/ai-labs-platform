@@ -95,6 +95,9 @@ function managerPrompt(
 }
 
 function requireRuntime(database: OrchestratorDatabase, agent: OrgAgent): AgentRuntime {
+  // Named by agent, not runtime id — there is no runtime id to name instead,
+  // and an owner acts on this by picking one for the agent.
+  if (!agent.runtimeId) throw new Error(`Agent has no runtime assigned: ${agent.id}`);
   const runtime = database.getAgent(agent.runtimeId);
   if (!runtime) throw new Error(`Agent runtime not found: ${agent.runtimeId}`);
   if (!runtime.enabled) throw new Error(`Agent runtime is disabled: ${agent.runtimeId}`);

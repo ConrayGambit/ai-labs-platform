@@ -1,9 +1,9 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acpSpawnOptions, resolveAcpLaunch } from '../../src/server/acp/launch.js';
+import { agentSpawnOptions, acpSpawnOptions, resolveAcpLaunch } from '../../src/server/acp/launch.js';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
-import type { AgentRuntime } from '../../src/shared/domain.js';
+import type { AgentRuntime, OrgAgent } from '../../src/shared/domain.js';
 
 /** A runtime with only the fields these functions read. */
 function runtime(overrides: Partial<AgentRuntime>): AgentRuntime {
@@ -25,6 +25,40 @@ function runtime(overrides: Partial<AgentRuntime>): AgentRuntime {
     enabled: true,
     isCoordinator: false,
     timeoutMs: 600_000,
+    createdAt: '2026-08-11T00:00:00.000Z',
+    updatedAt: '2026-08-11T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/** An organizational agent with only the fields agentSpawnOptions reads. */
+function orgAgent(overrides: Partial<OrgAgent>): OrgAgent {
+  return {
+    id: 'test-agent',
+    organizationId: 'default-org',
+    name: 'Test Agent',
+    jobTitle: 'Specialist',
+    department: 'Research',
+    jobFunction: 'Does the work.',
+    responsibilities: 'Work.',
+    instructions: '',
+    runtimeId: 'test-runtime',
+    managerId: null,
+    authorityLevel: 50,
+    canDelegate: false,
+    model: null,
+    speed: null,
+    effort: null,
+    skillIds: [],
+    enabled: true,
+    tenure: 'hired',
+    expiryKind: null,
+    expiryAt: null,
+    ventureId: null,
+    departmentId: null,
+    dedication: 'shared',
+    dedicationReason: null,
+    reportsToUserId: null,
     createdAt: '2026-08-11T00:00:00.000Z',
     updatedAt: '2026-08-11T00:00:00.000Z',
     ...overrides,
@@ -112,6 +146,56 @@ describe('acpSpawnOptions', () => {
     expect(options.env).toEqual({ PROVIDER_TOKEN: 'resolved-at-launch' });
     expect(options.cwd).toBe('/tmp/project');
     delete process.env.ACP_LAUNCH_TEST_TOKEN;
+  });
+});
+
+describe('agentSpawnOptions', () => {
+  // What RunSupervisor's real, production-wired `spawnFor` does — see
+  // src/server/index.ts. Unlike acpSpawnOptions above (which only ever sees a
+  // runtime that already exists), this is the boundary where an organizational
+  // agent's own state — no runtime at all, or a runtime that is gone or
+  // disabled — is refused before anything spawns.
+
+  it('refuses an agent with no runtime assigned, naming the agent, without consulting the registry at all', () => {
+    const agent = orgAgent({ id: 'agent-1', runtimeId: null });
+    const getAgent = () => {
+      throw new Error('getAgent must not be called when the agent has no runtime to look up');
+    };
+    expect(() => agentSpawnOptions(agent, { getAgent }, '/tmp/project')).toThrow(/agent-1/);
+    expect(() => agentSpawnOptions(agent, { getAgent }, '/tmp/project')).toThrow(/no runtime/i);
+  });
+
+  it('refuses when the assigned runtime no longer exists in the registry', () => {
+    const agent = orgAgent({ id: 'agent-1', runtimeId: 'gone-runtime' });
+    const options = { getAgent: () => null };
+    expect(() => agentSpawnOptions(agent, options, '/tmp/project')).toThrow(/agent-1/);
+    expect(() => agentSpawnOptions(agent, options, '/tmp/project')).toThrow(/gone-runtime/);
+  });
+
+  it('refuses a disabled runtime before spawning anything — the ACP path honouring `enabled`', () => {
+    const agent = orgAgent({ id: 'agent-1', runtimeId: 'off-runtime' });
+    const options = {
+      getAgent: () => runtime({ id: 'off-runtime', acpCommand: 'gemini', enabled: false }),
+    };
+    expect(() => agentSpawnOptions(agent, options, '/tmp/project')).toThrow(/off-runtime/);
+    expect(() => agentSpawnOptions(agent, options, '/tmp/project')).toThrow(/disabled/i);
+  });
+
+  it('delegates to acpSpawnOptions once a live, enabled runtime is found', () => {
+    const agent = orgAgent({ id: 'agent-1', runtimeId: 'good-runtime' });
+    const options = {
+      getAgent: () => runtime({ id: 'good-runtime', acpCommand: 'gemini', acpArgs: ['--acp'] }),
+    };
+    const result = agentSpawnOptions(agent, options, '/tmp/project');
+    expect(result.command).toBe('gemini');
+    expect(result.args).toEqual(['--acp']);
+    expect(result.cwd).toBe('/tmp/project');
+  });
+
+  it('still refuses a runtime with no ACP invocation, via acpSpawnOptions', () => {
+    const agent = orgAgent({ id: 'agent-1', runtimeId: 'no-acp-runtime' });
+    const options = { getAgent: () => runtime({ id: 'no-acp-runtime' }) };
+    expect(() => agentSpawnOptions(agent, options, '/tmp/project')).toThrow(/no ACP invocation/i);
   });
 });
 

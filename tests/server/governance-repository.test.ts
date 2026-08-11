@@ -182,6 +182,46 @@ describe('roles on a card at a gate', () => {
     })).not.toThrow();
   });
 
+  /**
+   * Reviewer independence is decided by comparing effective models
+   * (`canReview` in shared/governance.ts), and a null runtime has no defined
+   * answer to that comparison. The ruling: refuse the assignment outright
+   * rather than let a null runtime reach that comparison at all — an
+   * unassigned agent could never have run to file a review anyway, so refusing
+   * here turns a confusing downstream failure into an answerable one. Covers
+   * both roles: a runtime-less agent must be refused as builder AND as
+   * reviewer, since either path constructs a `ReviewerIdentity` for it.
+   */
+  it('REFUSES an agent with no runtime assigned, as builder and as reviewer, naming the reason', () => {
+    const { card, builder } = seed();
+    const unassigned = database!.createOrgAgent({
+      name: 'Unassigned', jobTitle: 'S', department: 'D', jobFunction: 'F', responsibilities: 'R',
+      runtimeId: database!.createAgent({
+        name: 'rt-temp', command: 'rt-temp', argsTemplate: ['{prompt}'],
+        promptTransport: 'argument', outputFormat: 'text',
+        versionArgs: ['--version'], timeoutMs: 120_000,
+      }).id,
+      model: 'model-temp',
+    });
+    // Nothing in the domain layer produces this state yet (creation still
+    // requires a runtime); simulated directly, the same way the test above
+    // simulates a retired agent.
+    database!.connection.prepare('UPDATE org_agents SET runtime_id = NULL WHERE id = ?').run(unassigned.id);
+
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: unassigned.id,
+    })).toThrow(/no runtime/i);
+    expect(database!.governance.getBuilder(card.id, 'G1')).toBeNull();
+
+    database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: builder.id,
+    });
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: unassigned.id,
+    })).toThrow(/no runtime/i);
+    expect(database!.governance.listReviewers(card.id, 'G1')).toEqual([]);
+  });
+
   it('allows a different builder at a different gate on the same card', () => {
     const { card, builder, otherModel } = seed();
     database!.governance.assignRole({

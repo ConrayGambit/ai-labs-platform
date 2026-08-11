@@ -319,12 +319,30 @@ export function createGovernanceRepository(connection: Database.Database): Gover
     "SELECT * FROM review_assignments WHERE card_id = ? AND gate_id = ? AND role = 'builder'",
   );
 
-  /** The identity fields that decide review eligibility, and nothing more. */
+  /**
+   * The identity fields that decide review eligibility, and nothing more.
+   *
+   * Refuses an agent with no runtime rather than handing one to a caller: this
+   * is the only place a `ReviewerIdentity` is built, so refusing here is what
+   * keeps a null runtime out of `effectiveModel` and `canReview` entirely —
+   * both compare runtimes to decide independence, and a null runtime has no
+   * defined answer to that comparison. The ruling is to refuse the assignment,
+   * not to give either function a null branch (which would change what the
+   * comparison means because a column became nullable, not preserve it).
+   *
+   * An unassigned agent could never have run to file a review anyway, so this
+   * turns a confusing downstream failure into one an owner can act on, at the
+   * point authority is actually granted (`assignRole`, and the re-check
+   * `insertReviewRecord` performs when a review is filed).
+   */
   const identityOf = (orgAgentId: string): ReviewerIdentity => {
     const row = connection
       .prepare('SELECT id, model, runtime_id FROM org_agents WHERE id = ?')
-      .get(orgAgentId) as { id: string; model: string | null; runtime_id: string } | undefined;
+      .get(orgAgentId) as { id: string; model: string | null; runtime_id: string | null } | undefined;
     if (!row) throw new Error(`Organizational agent not found: ${orgAgentId}`);
+    if (row.runtime_id === null) {
+      throw new Error(`${orgAgentId} has no runtime assigned and may not hold a role on a card`);
+    }
     return { id: row.id, model: row.model, runtimeId: row.runtime_id };
   };
 

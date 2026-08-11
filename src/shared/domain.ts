@@ -115,7 +115,16 @@ export interface OrgAgent {
   jobFunction: string;
   responsibilities: string;
   instructions: string;
-  runtimeId: string;
+  /**
+   * NULL means this agent has no provider assigned. The model powers an
+   * employee; it does not define that employee's identity — so an agent may
+   * exist, be viewed and be edited with no runtime, and is refused only at the
+   * point it would actually run (`spawnFor`) or hold a role at a gate
+   * (`assignRole`). Creation still requires one (`CreateOrgAgentInput.runtimeId`
+   * stays a required string) — this is the state a runtime's own retirement
+   * would eventually leave an agent in, not a state creation can produce.
+   */
+  runtimeId: string | null;
   managerId: string | null;
   authorityLevel: number;
   canDelegate: boolean;

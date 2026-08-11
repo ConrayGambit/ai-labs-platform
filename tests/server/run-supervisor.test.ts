@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { agentSpawnOptions } from '../../src/server/acp/launch.js';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 import { createRunSupervisor, type RunSupervisor } from '../../src/server/run-supervisor.js';
 import { buildPrompt, OWNER_NOTES_HEADING } from '../../src/server/run-prompt.js';
@@ -81,6 +82,42 @@ describe('the run supervisor', () => {
         env: { FAKE_ACP_SCRIPT: JSON.stringify(script) },
       }),
     });
+
+  /**
+   * These two, unlike every other test in this file, wire `spawnFor` the way
+   * `src/server/index.ts` really does: through `agentSpawnOptions`, resolving
+   * the agent's own runtime rather than handing back a script fixture. That is
+   * "the ACP path" — the one every run actually takes — and this pair proves
+   * it refuses before a provider process is ever spawned, for both ways an
+   * agent's runtime can fail to be usable: absent, and disabled.
+   */
+  it('refuses an agent with no runtime assigned, before spawning anything', async () => {
+    const { card, agent } = seed();
+    database!.connection.prepare('UPDATE org_agents SET runtime_id = NULL WHERE id = ?').run(agent.id);
+    supervisor = createRunSupervisor({
+      database: database!,
+      spawnFor: (a) => agentSpawnOptions(a, database!, process.cwd()),
+    });
+
+    await expect(supervisor.startRun({
+      cardId: card.id, orgAgentId: agent.id, message: 'Begin.',
+    })).rejects.toThrow(/no runtime/i);
+  });
+
+  it('refuses a disabled runtime on the ACP path, before spawning anything', async () => {
+    const { card, agent } = seed();
+    // Nothing in the domain layer exposes "disable a runtime" yet — simulated
+    // directly, the same way the governance tests simulate a retired agent.
+    database!.connection.prepare('UPDATE agents SET enabled = 0 WHERE id = ?').run(agent.runtimeId!);
+    supervisor = createRunSupervisor({
+      database: database!,
+      spawnFor: (a) => agentSpawnOptions(a, database!, process.cwd()),
+    });
+
+    await expect(supervisor.startRun({
+      cardId: card.id, orgAgentId: agent.id, message: 'Begin.',
+    })).rejects.toThrow(/disabled/i);
+  });
 
   it('returns as soon as the run is recorded, without waiting for the turn', async () => {
     const { card, agent } = seed();

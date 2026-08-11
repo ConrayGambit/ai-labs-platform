@@ -1,7 +1,8 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { resolveRuntimeEnv } from '../agent-process.js';
-import type { AgentRuntime } from '../../shared/domain.js';
+import type { AgentRuntime, OrgAgent } from '../../shared/domain.js';
+import type { OrchestratorDatabase } from '../database.js';
 import type { AcpClientOptions } from './client.js';
 
 /**
@@ -84,4 +85,45 @@ export function acpSpawnOptions(runtime: AgentRuntime, cwd: string): AcpClientOp
   }
   const { command, args } = resolveAcpLaunch(runtime.acpCommand, runtime.acpArgs);
   return { command, args, cwd, env: resolveRuntimeEnv(runtime.env ?? {}) };
+}
+
+/**
+ * What `RunSupervisor`'s real `spawnFor` dependency uses to launch an
+ * organizational agent's provider for a session — see `src/server/index.ts`.
+ *
+ * Three refusals, all before anything spawns, for the three ways an agent can
+ * fail to name a live, usable, ACP-capable provider:
+ *
+ * 1. No runtime assigned at all (`OrgAgent.runtimeId` is null — an agent may
+ *    exist with no provider; PRODUCT.md's "the model powers an employee; it
+ *    does not define that employee's identity"). Refused before the registry
+ *    is even consulted, and named by agent, since there is no runtime id to
+ *    name instead.
+ * 2. The assigned runtime no longer exists in the registry.
+ * 3. The assigned runtime exists but is disabled. This is the ACP run path —
+ *    the one every run actually takes — honouring `enabled`; the legacy
+ *    hierarchy orchestrator (`requireRuntime` in `hierarchy.ts`) already did,
+ *    and nothing here did until now.
+ *
+ * `acpSpawnOptions` performs a fourth, on the runtime itself: no ACP
+ * invocation registered.
+ */
+export function agentSpawnOptions(
+  agent: OrgAgent,
+  database: Pick<OrchestratorDatabase, 'getAgent'>,
+  cwd: string,
+): AcpClientOptions {
+  if (!agent.runtimeId) {
+    throw new Error(
+      `Agent ${agent.id} has no runtime assigned and cannot run a session; assign it one first`,
+    );
+  }
+  const runtime = database.getAgent(agent.runtimeId);
+  if (!runtime) {
+    throw new Error(`Runtime not found for agent ${agent.id}: ${agent.runtimeId}`);
+  }
+  if (!runtime.enabled) {
+    throw new Error(`Runtime is disabled for agent ${agent.id}: ${agent.runtimeId}`);
+  }
+  return acpSpawnOptions(runtime, cwd);
 }

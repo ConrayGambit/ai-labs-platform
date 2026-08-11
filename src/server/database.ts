@@ -103,7 +103,7 @@ interface OrgAgentRow {
   job_function: string;
   responsibilities: string;
   instructions: string;
-  runtime_id: string;
+  runtime_id: string | null;
   manager_id: string | null;
   authority_level: number;
   can_delegate: number;

@@ -232,6 +232,7 @@ export function buildApp({
       message.startsWith('Hierarchy exceeds maximum depth') ||
       message.startsWith('Hierarchy runs support at most') ||
       message.startsWith('Organizational agent is not assigned to project:') ||
+      message.startsWith('Agent has no runtime assigned:') ||
       message.startsWith('Agent runtime is disabled:') ||
       // governance: the submitted content itself is incomplete, not who sent
       // it or what state the record is in.
