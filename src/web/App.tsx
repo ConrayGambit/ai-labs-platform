@@ -1329,7 +1329,7 @@ export function App() {
             <span aria-hidden="true">◧</span> Dashboard
           </button>
           <button className={view === 'organizations' ? 'active' : ''} onClick={() => setView('organizations')} type="button">
-            <span aria-hidden="true">⌘</span> Organizations
+            <span aria-hidden="true">▤</span> Organizations
           </button>
           <button className={view === 'skills' ? 'active' : ''} onClick={() => setView('skills')} type="button">
             <span aria-hidden="true">✦</span> Skills
@@ -1386,7 +1386,7 @@ export function App() {
             <h1>{viewTitle}</h1>
           </div>
           <div className="topbar-actions">
-            <span className="command-hint">⌘ K</span>
+            <span className="command-hint">Ctrl K</span>
             <button
               className="primary-button"
               disabled={projects.length === 0}
