@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 import { createGovernanceService, type GovernanceService } from '../../src/server/governance-service.js';
+import { PRODUCT_LADDER, canAdvance } from '../../src/server/gate-policy.js';
 import type { FindingInput } from '../../src/shared/governance.js';
 
 describe('adjudication', () => {
@@ -286,6 +287,54 @@ describe('adjudication', () => {
     expect(service!.listOpenEscalations().map((e) => e.cardId)).toEqual([card.id]);
     // The move is recorded as the platform's doing, not a person's.
     expect(database!.work.listActivity(card.id).at(-1)).toMatchObject({ actorType: 'system' });
+  });
+
+  // Found by code review: the P0 stop was trivially reversible. canAdvance
+  // exempted every move out of blocked, and moveCard had no escalation check,
+  // so a stopped card could be walked straight back into progress with the P0
+  // still open — the rule spec 20.4.5 calls "stops the affected work".
+  it('REFUSES to move a P0-blocked card back into work, in policy AND at the write', () => {
+    const { card, reviewerA } = seed();
+    file(card.id, reviewerA.id, [finding({
+      priority: 'P0', area: 'access', finding: 'No venture check.',
+      predictedFailure: 'Cross-venture read.', evidence: 'src/server/work-api.ts:88',
+    })]);
+    const blocked = database!.work.getCard(card.id)!;
+    expect(blocked.status).toBe('blocked');
+
+    const verdict = canAdvance({
+      card: blocked, ladder: PRODUCT_LADDER, to: 'in_progress',
+      evidence: {
+        reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
+        missingSpecificationSections: [], missingHandoverPoints: [], hasOpenP0: true,
+      },
+    });
+
+    // Policy refuses...
+    expect(verdict.allowed).toBe(false);
+    // ...and so does the only write, so the two cannot disagree.
+    expect(() => database!.work.moveCard({
+      cardId: card.id, to: 'in_progress', position: 0, userId: 'owner',
+    })).toThrow(/P0/i);
+    expect(database!.work.getCard(card.id)?.status).toBe('blocked');
+  });
+
+  it('lets the card move again once the owner has resolved the P0', () => {
+    const { card, reviewerA } = seed();
+    const filed = file(card.id, reviewerA.id, [finding({
+      priority: 'P0', area: 'access', finding: 'No venture check.',
+      predictedFailure: 'Cross-venture read.', evidence: 'src/server/work-api.ts:88',
+    })]);
+    service!.resolveEscalation({
+      escalationId: filed.escalations[0]!.id, resolution: 'Fixed.', resolvedByUserId: 'owner',
+    });
+
+    // resolveEscalation itself performs a move, so it must not be caught by
+    // its own rule — the escalation is closed before the card is released.
+    expect(database!.work.getCard(card.id)?.status).toBe('in_progress');
+    expect(() => database!.work.moveCard({
+      cardId: card.id, to: 'ready', position: 0, userId: 'owner',
+    })).not.toThrow();
   });
 
   it('leaves unblocked work running while one card is stopped', () => {

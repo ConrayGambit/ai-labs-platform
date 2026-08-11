@@ -56,6 +56,7 @@ describe('the gate that requires it', () => {
     artifactCount: 1,
     missingSpecificationSections: missing,
     missingHandoverPoints: [],
+    hasOpenP0: false,
   });
 
   it('DENIES leaving G1 while the specification is incomplete, naming what is missing', () => {

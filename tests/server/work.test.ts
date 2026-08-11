@@ -188,6 +188,37 @@ describe('the card model, the owner notes and the activity log', () => {
 
   // Found in review: a lowering was accepted at write time and only refused
   // when the count was READ, so a bad number made every board read throw.
+  // Found by code review: the CARD path validated a lowering at the write, the
+  // PROJECT path did not — the identical bug, one file over. A project created
+  // with 0 made every board read for every card in it throw.
+  it('REFUSES a PROJECT reviewer override that would lower the requirement', () => {
+    database = createDatabase(':memory:');
+    const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
+    const venture = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'V', kind: 'research', mission: 'M.',
+    });
+
+    expect(() => database!.platform.createProject({
+      ventureId: venture.id, name: 'P', objective: 'O.', successCriteria: ['C'],
+      reviewerCountOverride: 0,
+    })).toThrow(/raised but not lowered/i);
+    expect(database.platform.listProjects(venture.id)).toEqual([]);
+  });
+
+  it('accepts a PROJECT reviewer override that raises the requirement', () => {
+    database = createDatabase(':memory:');
+    const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
+    const venture = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'V', kind: 'research', mission: 'M.',
+    });
+
+    const project = database.platform.createProject({
+      ventureId: venture.id, name: 'P', objective: 'O.', successCriteria: ['C'],
+      reviewerCountOverride: 2,
+    });
+    expect(project.reviewerCountOverride).toBe(2);
+  });
+
   it('REFUSES a reviewer raise that would LOWER the ladder requirement', () => {
     database = createDatabase(':memory:');
     const project = seedProject();

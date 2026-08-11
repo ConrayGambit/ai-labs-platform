@@ -145,6 +145,7 @@ export function registerWorkApi(
         artifactCount: database.work.listArtifacts(card.id).length,
         missingSpecificationSections: database.governance.missingSpecificationSections(card.id),
         missingHandoverPoints: database.governance.missingHandoverPoints(card.id),
+        hasOpenP0: database.governance.hasOpenP0(card.id),
       },
     });
     // The gate is enforced here, not in the client. A board that only checks in

@@ -14,7 +14,7 @@ import { denial } from '../helpers/verdict.js';
 // The specification rule has its own suite.
 const NO_EVIDENCE: AdvanceEvidence = {
   reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
-  missingSpecificationSections: [], missingHandoverPoints: [],
+  missingSpecificationSections: [], missingHandoverPoints: [], hasOpenP0: false,
 };
 
 describe('gate ladders as policy data', () => {
