@@ -391,6 +391,10 @@ button { color: inherit; }
    defined above under Card board), reused verbatim rather than styled anew. */
 .run-panel { display: grid; gap: 12px; }
 .run-connection { margin: 0; color: var(--quiet); font-size: 11px; }
+/* A refused request this panel just made — answering, cancelling, or the
+   initial subscribe — reuses .form-error verbatim (the same object as any
+   other refused/invalid state); this wrapper only stacks more than one. */
+.run-refusals { display: grid; gap: 8px; }
 .run-panel-status { display: flex; align-items: center; gap: 8px; }
 .run-live-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
 /* Pending Amber: "in progress, queued, running" (DESIGN.md, Secondary colours) — a live run, exactly. */
@@ -407,6 +411,12 @@ button { color: inherit; }
 .transcript-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; max-height: 360px; overflow-y: auto; }
 .transcript-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
 .transcript-text { color: var(--secondary); font-size: 13px; line-height: 1.5; }
+/* Body size, not .form-note's 10px: DESIGN.md's Small Type Is Earned Rule —
+   "never put anything there that a person must read to make a decision."
+   The core's own reason a control is unavailable (why Cancel or an answer
+   cannot go through, why starting a run needs an assignee first) is exactly
+   that; .form-note itself is unchanged for its other, lower-stakes uses. */
+.run-note { margin: 0; color: var(--quiet); font-size: 13px; line-height: 1.5; }
 /* Same divider language as .options-editor above: a Rule Hairline Faint
    separates the "start a new run" region from whatever this panel is
    already watching, on the panel's own grid gap rather than an added margin. */

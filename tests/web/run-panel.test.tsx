@@ -136,6 +136,15 @@ describe('the run panel', () => {
     ]);
   });
 
+  it('makes the transcript keyboard-focusable, so a keyboard-only user can scroll back through a long replay', () => {
+    mockUseRunStream.mockReturnValue(stream({
+      updates: [agentMessage('Reading the card')],
+      connection: 'open',
+    }));
+    render(<RunPanel assigneeOrgAgentId="agent-1" cardId="card-1" runId="run-1" />);
+    expect(screen.getByRole('list', { name: /run transcript/i })).toHaveAttribute('tabindex', '0');
+  });
+
   it('renders a tool call and a usage update without assuming fields a provider did not send', async () => {
     mockUseRunStream.mockReturnValue(stream({
       updates: [
@@ -153,7 +162,10 @@ describe('the run panel', () => {
   it('shows the connection state, so a dead socket is never mistaken for a quiet run', () => {
     mockUseRunStream.mockReturnValue(stream({ connection: 'error' }));
     render(<RunPanel assigneeOrgAgentId="agent-1" cardId="card-1" runId="run-1" />);
-    expect(screen.getByText(/connection error/i)).toBeInTheDocument();
+    // Scoped to the connection line itself: an 'error' connection now also
+    // disables Cancel with its own "Connection error." reason (see the
+    // it.each below), so the phrase legitimately appears twice.
+    expect(screen.getByText(/connection error/i, { selector: '.run-connection' })).toBeInTheDocument();
   });
 
   it('disables the cancel control with the core\'s stated reason when run.cancel is unsupported', () => {
@@ -177,12 +189,78 @@ describe('the run panel', () => {
     expect(screen.getByText('This core does not implement run.permission.')).toBeInTheDocument();
   });
 
+  it('renders the pending permission as a labelled group, not an alert that steals focus from a decision the user must make', () => {
+    mockUseRunStream.mockReturnValue(stream({ pending: pendingPermission(), connection: 'open' }));
+    render(<RunPanel assigneeOrgAgentId="agent-1" cardId="card-1" runId="run-1" />);
+    expect(screen.getByRole('group', { name: 'Needs your decision' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'Needs your decision' })).not.toBeInTheDocument();
+  });
+
+  it('surfaces a refused request rather than dropping it — the two-window race: this window answers after another window already did', async () => {
+    // useRunStream clears `pending` optimistically before the server confirms
+    // the answer (see useRunStream.ts), so a refused answer_permission leaves
+    // nothing pending and, without this, nothing on screen saying why.
+    mockUseRunStream.mockReturnValue(stream({
+      pending: null,
+      updates: [agentMessage('Reading the card')],
+      unsupported: [{ capability: 'answer_permission', reason: 'Permission request has already been answered' }],
+      connection: 'open',
+    }));
+    render(<RunPanel assigneeOrgAgentId="agent-1" cardId="card-1" runId="run-1" />);
+    expect(screen.getByText(
+      'Answering was refused: Permission request has already been answered',
+    )).toBeInTheDocument();
+  });
+
+  it('surfaces a refused cancel_run or subscribe the same way, each named to its own action', () => {
+    mockUseRunStream.mockReturnValue(stream({
+      connection: 'open',
+      unsupported: [
+        { capability: 'cancel_run', reason: 'Run not found: run-1' },
+        { capability: 'subscribe', reason: 'Access denied: run run-1' },
+      ],
+    }));
+    render(<RunPanel assigneeOrgAgentId="agent-1" cardId="card-1" runId="run-1" />);
+    expect(screen.getByText('Cancelling was refused: Run not found: run-1')).toBeInTheDocument();
+    expect(screen.getByText('Connecting to this run was refused: Access denied: run run-1')).toBeInTheDocument();
+  });
+
+  it('does not mistake a capability-negotiation entry (run.stream) for a request refusal', () => {
+    mockUseRunStream.mockReturnValue(stream({
+      connection: 'open',
+      unsupported: [{ capability: 'run.stream', reason: 'This core does not implement run.stream.' }],
+    }));
+    render(<RunPanel assigneeOrgAgentId="agent-1" cardId="card-1" runId="run-1" />);
+    expect(screen.queryByText(/This core does not implement run\.stream\./)).not.toBeInTheDocument();
+  });
+
   it('calls cancel() through the hook when the control is enabled', () => {
     const cancel = vi.fn();
     mockUseRunStream.mockReturnValue(stream({ connection: 'open', cancel }));
     render(<RunPanel assigneeOrgAgentId="agent-1" cardId="card-1" runId="run-1" />);
     fireEvent.click(screen.getByRole('button', { name: /cancel run/i }));
     expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['connecting' as const, 'Still connecting.'],
+    ['closed' as const, 'Disconnected.'],
+    ['error' as const, 'Connection error.'],
+  ])('disables cancel and the permission options when the connection is %s, not just when unsupported names them', (connection, reason) => {
+    // The bug this defends against: before the core's hello arrives (or after
+    // a drop), `unsupported` is still `[]`, so a check that only reads
+    // `unsupported` sees nothing wrong and renders both controls as live —
+    // cancel()/answer() would then no-op inside the hook, silently, because
+    // they gate on a negotiated capability this panel cannot see at all.
+    mockUseRunStream.mockReturnValue(stream({ pending: pendingPermission(), connection, unsupported: [] }));
+    render(<RunPanel assigneeOrgAgentId="agent-1" cardId="card-1" runId="run-1" />);
+    expect(screen.getByRole('button', { name: /cancel run/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
+    // Two separate reasons render (cancel's own, and the permission block's
+    // own) — assert the count rather than a single getByText, which would
+    // throw on more than one match.
+    expect(screen.getAllByText(reason)).toHaveLength(2);
   });
 
   it('disables cancel once the run has finished, even when run.cancel is supported', () => {
