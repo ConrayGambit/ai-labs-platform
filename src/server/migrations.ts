@@ -860,4 +860,21 @@ export const MIGRATIONS: Migration[] = [
         ALTER TABLE cards ADD COLUMN cost_ceiling_tokens INTEGER;
       `,
   },
+  {
+    id: '0022-acp-invocation',
+    // How a runtime launches for an ACP session, as opposed to a single-shot
+    // call. The two cannot share `command`/`args_json`: the single-shot form
+    // carries a `{prompt}` placeholder that only `renderArgument` substitutes,
+    // and the ACP path has no substitution step and no prompt in argv at all —
+    // the prompt travels in `session/prompt`. One runtime id serves both
+    // systems, so it needs both invocations.
+    //
+    // NULL `acp_command` means "this runtime has no ACP invocation", which
+    // `spawnFor` refuses loudly. Columns only: the builtin backfill lives in
+    // createDatabase beside the env and option backfills it matches.
+    sql: `
+        ALTER TABLE agents ADD COLUMN acp_command TEXT;
+        ALTER TABLE agents ADD COLUMN acp_args_json TEXT NOT NULL DEFAULT '[]';
+      `,
+  },
 ];

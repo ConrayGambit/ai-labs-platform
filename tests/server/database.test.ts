@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 
@@ -17,8 +20,10 @@ describe('orchestrator database', () => {
       expect.objectContaining({ id: 'kimi', kind: 'kimi', command: 'kimi' }),
       expect.objectContaining({ id: 'claude', kind: 'claude', command: 'claude' }),
       expect.objectContaining({ id: 'codex', kind: 'codex', command: 'codex' }),
+      expect.objectContaining({ id: 'prime', kind: 'custom', command: 'prime-agent' }),
       expect.objectContaining({ id: 'deepseek', kind: 'custom', command: 'claude' }),
       expect.objectContaining({ id: 'minimax', kind: 'custom', command: 'claude' }),
+      expect.objectContaining({ id: 'gemini', kind: 'custom', command: 'gemini' }),
     ]);
 
     // API providers bridge through the Claude Code CLI with endpoint env, and
@@ -51,19 +56,41 @@ describe('orchestrator database', () => {
       'claude-fable-5',
       'claude-haiku-4-5',
     ]);
-    expect(claude?.optionValues.effort).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(claude?.optionValues.effort).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
 
     const codex = database.getAgent('codex');
     expect(codex?.optionTemplates.effort).toEqual(['-c', 'model_reasoning_effort={value}']);
-    expect(codex?.optionValues.model).toEqual([
-      'gpt-5.1-codex-max',
-      'gpt-5.1-codex',
-      'gpt-5.1-codex-mini',
-    ]);
+    expect(codex?.optionValues.model).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+    expect(codex?.optionValues.effort).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
 
     const kimi = database.getAgent('kimi');
+    expect(kimi?.optionTemplates.model).toEqual(['--model', '{value}']);
     expect(kimi?.optionTemplates.effort).toEqual(['--thinking']);
     expect(kimi?.optionValues.effort).toEqual(['high']);
+
+    // The coordinator runtime: previously published no option templates at
+    // all, which is the bug this task closes. It has a real --model flag and
+    // no fixed catalog, so no curated optionValues.model is published either.
+    const hermes = database.getAgent('hermes');
+    expect(hermes?.optionTemplates).toEqual({ model: ['--model', '{value}'] });
+    expect(hermes?.optionValues.model).toBeUndefined();
+
+    // Prime Agent: --thinking is a closed, documented enum; --model is a
+    // free-form pattern with no published list.
+    const prime = database.getAgent('prime');
+    expect(prime?.command).toBe('prime-agent');
+    expect(prime?.optionTemplates).toEqual({
+      model: ['--model', '{value}'],
+      effort: ['--thinking', '{value}'],
+    });
+    expect(prime?.optionValues).toEqual({
+      effort: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    });
+
+    // No runtime in this registry accepts a launch flag for speed.
+    for (const agent of database.listAgents()) {
+      expect(agent.optionTemplates.speed, `${agent.id} unexpectedly publishes a speed template`).toBeUndefined();
+    }
   });
 
   it('registers a custom CLI runtime through the shared adapter contract', () => {
@@ -156,5 +183,94 @@ describe('orchestrator database', () => {
 
     expect(database.getRun(run.id)).toMatchObject({ id: run.id, status: 'completed' });
     expect(database.listRunMessages(run.id)).toEqual([message]);
+  });
+
+  it('round-trips an ACP invocation on a custom runtime', () => {
+    database = createDatabase(':memory:');
+
+    const runtime = database.createAgent({
+      name: 'Local ACP Bridge',
+      command: 'local-agent',
+      argsTemplate: ['run', '--prompt', '{prompt}'],
+      acpCommand: 'npm:@example/some-acp-adapter',
+      acpArgs: ['--stdio'],
+    });
+
+    expect(runtime.acpCommand).toBe('npm:@example/some-acp-adapter');
+    expect(runtime.acpArgs).toEqual(['--stdio']);
+    expect(database.getAgent(runtime.id)).toEqual(runtime);
+  });
+
+  it('defaults a runtime registered without an ACP invocation to none', () => {
+    database = createDatabase(':memory:');
+
+    const runtime = database.createAgent({
+      name: 'Single Shot Only',
+      command: 'local-agent',
+      argsTemplate: ['{prompt}'],
+    });
+
+    expect(runtime.acpCommand).toBeNull();
+    expect(runtime.acpArgs).toEqual([]);
+  });
+
+  it('seeds an ACP invocation only for runtimes that have one', () => {
+    database = createDatabase(':memory:');
+
+    const CLAUDE_ADAPTER = 'npm:@agentclientprotocol/claude-agent-acp';
+    expect(database.getAgent('claude')?.acpCommand).toBe(CLAUDE_ADAPTER);
+    // The API-compatible providers reach their endpoint through the same
+    // adapter, carrying the ANTHROPIC_BASE_URL they already set.
+    expect(database.getAgent('deepseek')?.acpCommand).toBe(CLAUDE_ADAPTER);
+    expect(database.getAgent('minimax')?.acpCommand).toBe(CLAUDE_ADAPTER);
+    expect(database.getAgent('codex')?.acpCommand).toBe('npm:@agentclientprotocol/codex-acp');
+
+    // Gemini speaks ACP natively rather than through an adapter, so the flag
+    // rides in acpArgs.
+    expect(database.getAgent('gemini')?.acpCommand).toBe('npm:@google/gemini-cli');
+    expect(database.getAgent('gemini')?.acpArgs).toEqual(['--acp']);
+
+    // Prime Agent also speaks ACP natively, and installs as a real PATH
+    // executable through its own installer rather than an npm package, so
+    // the command carries no `npm:` prefix (see the `prime` entry's comment
+    // in src/server/agent-catalog.ts).
+    expect(database.getAgent('prime')?.acpCommand).toBe('prime-agent');
+    expect(database.getAgent('prime')?.acpArgs).toEqual(['--mode', 'acp']);
+
+    // No published ACP mode was confirmed for these. NULL is refused loudly by
+    // acpSpawnOptions; a guessed flag would be the defect this work removes.
+    for (const id of ['kimi', 'hermes']) {
+      expect(database.getAgent(id)?.acpCommand, `${id} should have no ACP invocation`).toBeNull();
+    }
+
+    // The single-shot invocation is untouched: the legacy hierarchy path still
+    // depends on the {prompt} placeholder these carry.
+    expect(database.getAgent('claude')?.argsTemplate).toEqual([
+      '-p', '{prompt}', '--output-format', 'json', '--max-turns', '10',
+    ]);
+  });
+
+  it('backfills an ACP invocation onto a runtime that predates the column', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ai-labs-acp-'));
+    const file = join(directory, 'orchestrator.db');
+    try {
+      const first = createDatabase(file);
+      // The pre-migration state: the row exists, its ACP invocation does not.
+      first.connection.prepare("UPDATE agents SET acp_command = NULL WHERE id = 'claude'").run();
+      // An owner's own choice, which the backfill must not overwrite.
+      first.connection
+        .prepare("UPDATE agents SET acp_command = 'my-own-adapter' WHERE id = 'codex'")
+        .run();
+      first.close();
+
+      const second = createDatabase(file);
+      expect(second.getAgent('claude')?.acpCommand).toBe(
+        'npm:@agentclientprotocol/claude-agent-acp',
+      );
+      expect(second.getAgent('codex')?.acpCommand).toBe('my-own-adapter');
+      second.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

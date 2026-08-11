@@ -19,6 +19,13 @@ export interface AgentRuntime {
   kind: AgentKind;
   command: string;
   argsTemplate: string[];
+  /**
+   * How this runtime launches for an ACP session, when it can. NULL means it
+   * cannot: the single-shot `command`/`argsTemplate` above are a different
+   * invocation of the same provider and are not interchangeable with these.
+   */
+  acpCommand: string | null;
+  acpArgs: string[];
   promptTransport: PromptTransport;
   outputFormat: AgentOutputFormat;
   resultField: string | null;
@@ -37,6 +44,8 @@ export interface CreateAgentInput {
   name: string;
   command: string;
   argsTemplate: string[];
+  acpCommand?: string | null;
+  acpArgs?: string[];
   promptTransport?: PromptTransport;
   outputFormat?: AgentOutputFormat;
   resultField?: string | null;

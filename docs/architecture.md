@@ -30,6 +30,9 @@ Core service (Fastify) ------------------------------------- SQLite
                  v
         ACP client — JSON-RPC 2.0, newline-delimited, over the provider's stdio
                  |
+                 |  src/server/acp/launch.ts resolves the runtime's own ACP
+                 |  invocation to a shell-free spawn, and refuses to start a
+                 |  session when the runtime declares none
                  v
         Provider process launched from the runtime registry
         (shell: false, windowsHide, ${VAR} environment references)
@@ -149,5 +152,7 @@ A prompt is assembled in three tiers and sent as separate content blocks so the 
 
 Two extension points remain, and neither touches the protocol:
 
-- **The runtime registry** decides how a provider process is *launched*: executable, argument array, environment-variable references, option templates with verified value lists, version-probe arguments, timeout and output cap. Adding a runtime that speaks ACP is a registry entry.
+- **The runtime registry**, seeded from `src/server/agent-catalog.ts`, decides how a provider process is *launched*: executable, argument array, environment-variable references, option templates with verified value lists, version-probe arguments, timeout and output cap. Adding a runtime that speaks ACP is a registry entry.
+
+  A runtime carries **two** invocations, because one id serves two systems. The single-shot one takes the prompt as an argv value and substitutes it at spawn. The ACP one takes no prompt at all — it travels in `session/prompt` — and is either a plain command, used as-is, or `npm:<package>`, meaning "resolve that package's own bin and run it under this server's Node executable". The prefix is not decoration: everything spawns with `shell: false`, and under that a bare npm shim is unspawnable on Windows, so resolving the package's own entry point is what makes an adapter launchable at all. A runtime with no ACP invocation refuses a session **before spawning anything**, because the alternative — falling back to its single-shot command — sends a literal, unsubstituted prompt placeholder to a real provider as a billed call, then waits for JSON-RPC from a process that will never speak it.
 - **The gate ladder** decides how work is *governed*: gates, per-gate reviewer counts, independence, and where the owner signs. Adding a ladder changes a project's board and its evidence requirements, and changes nothing about projects, cards, runs or messages.

@@ -66,6 +66,15 @@ export interface GovernanceService {
   resolveEscalation(input: {
     escalationId: string; resolution: string; resolvedByUserId: string;
   }): P0Escalation;
+  /**
+   * The id of the card an escalation belongs to, or null if the escalation
+   * does not exist. A query over data this service already owns (p0_escalations
+   * is not on GovernanceRepository at all), the same shape as
+   * GovernanceRepository.getFindingCardId — a route keyed by an escalation id
+   * resolves its card here, so an unknown escalation and one whose card is
+   * unreachable read the same.
+   */
+  getEscalationCardId(escalationId: string): string | null;
 }
 
 interface RulingRow {
@@ -119,19 +128,23 @@ const mapEscalation = (row: EscalationRow): P0Escalation => ({
 export function createGovernanceService(database: OrchestratorDatabase): GovernanceService {
   const connection = database.connection;
 
+  /**
+   * The finding, with the fields ruling and contesting need. Card resolution
+   * is not re-derived here — getFindingCardId is the one place that lookup
+   * lives, the same reason getGateSealState lives in one place rather than
+   * being recomputed by each caller.
+   */
   const findingRow = (findingId: string) => {
+    const cardId = database.governance.getFindingCardId(findingId);
+    if (cardId === null) throw new Error(`Finding not found: ${findingId}`);
     const row = connection
       .prepare(
-        `SELECT f.*, r.card_id, r.gate_id, r.reviewer_org_agent_id
+        `SELECT f.priority, r.reviewer_org_agent_id
            FROM review_findings f JOIN reviews r ON r.id = f.review_id
           WHERE f.id = ?`,
       )
-      .get(findingId) as {
-        id: string; priority: Finding['priority']; card_id: string;
-        gate_id: GateId; reviewer_org_agent_id: string;
-      } | undefined;
-    if (!row) throw new Error(`Finding not found: ${findingId}`);
-    return row;
+      .get(findingId) as { priority: Finding['priority']; reviewer_org_agent_id: string };
+    return { cardId, priority: row.priority, reviewerOrgAgentId: row.reviewer_org_agent_id };
   };
 
   const listRulings = (findingId: string): Ruling[] =>
@@ -273,8 +286,8 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         // override with a date attached (spec 20.4 rule 4, spec 20.5).
         const registerEntry = !isOverride(input.outcome) ? null : database.governance.appendOverride({
           findingId: input.findingId,
-          cardId: finding.card_id,
-          reviewerOrgAgentId: finding.reviewer_org_agent_id,
+          cardId: finding.cardId,
+          reviewerOrgAgentId: finding.reviewerOrgAgentId,
           priority: finding.priority,
           reason: input.reason,
           residualRisk: input.residualRisk ?? '',
@@ -307,7 +320,7 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
        * finding has a final ruling" — turning the reviewer's one appeal into
        * the builder's lock.
        */
-      if (input.contestedByOrgAgentId !== finding.reviewer_org_agent_id) {
+      if (input.contestedByOrgAgentId !== finding.reviewerOrgAgentId) {
         throw new Error(
           'Only the reviewer who raised the finding may contest the ruling on it',
         );
@@ -400,6 +413,13 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
             .get(input.escalationId) as EscalationRow,
         );
       })();
+    },
+
+    getEscalationCardId(escalationId) {
+      const row = connection
+        .prepare('SELECT card_id AS cardId FROM p0_escalations WHERE id = ?')
+        .get(escalationId) as { cardId: string } | undefined;
+      return row?.cardId ?? null;
     },
   };
 }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { TASK_STATUSES } from '../shared/domain.js';
+import { BUILTIN_AGENTS, BUILTIN_OPTION_TEMPLATES, BUILTIN_OPTION_VALUES } from './agent-catalog.js';
 import { applyMigrations } from './migrations.js';
 import { createIdentityRepository, type IdentityRepository } from './identity-repository.js';
 import { createOrgRepository, type OrgRepository } from './org-repository.js';
@@ -53,6 +54,8 @@ interface AgentRow {
   kind: AgentKind;
   command: string;
   args_json: string;
+  acp_command: string | null;
+  acp_args_json: string;
   prompt_transport: PromptTransport;
   output_format: AgentOutputFormat;
   result_field: string | null;
@@ -170,148 +173,7 @@ interface MessageRow {
   created_at: string;
 }
 
-const BUILTIN_AGENTS = [
-  {
-    id: 'hermes',
-    name: 'Hermes Coordinator',
-    kind: 'hermes',
-    command: 'hermes',
-    args: ['chat', '-q', '{prompt}'],
-    outputFormat: 'text',
-    resultField: null,
-    coordinator: 1,
-    env: {},
-  },
-  {
-    id: 'kimi',
-    name: 'Kimi Code',
-    kind: 'kimi',
-    command: 'kimi',
-    args: ['-p', '{prompt}', '--output-format', 'text'],
-    outputFormat: 'text',
-    resultField: null,
-    coordinator: 0,
-    env: {},
-  },
-  {
-    id: 'claude',
-    name: 'Claude Code',
-    kind: 'claude',
-    command: 'claude',
-    args: ['-p', '{prompt}', '--output-format', 'json', '--max-turns', '10'],
-    outputFormat: 'json',
-    resultField: 'result',
-    coordinator: 0,
-    env: {},
-  },
-  {
-    id: 'codex',
-    name: 'OpenAI Codex',
-    kind: 'codex',
-    command: 'codex',
-    args: ['exec', '{prompt}'],
-    outputFormat: 'text',
-    resultField: null,
-    coordinator: 0,
-    env: {},
-  },
-  {
-    // DeepSeek has no official agent CLI; its API is Anthropic-compatible, so it
-    // runs through the installed Claude Code CLI against the DeepSeek endpoint.
-    id: 'deepseek',
-    name: 'DeepSeek (via Claude Code)',
-    kind: 'custom',
-    command: 'claude',
-    args: ['-p', '{prompt}', '--output-format', 'json', '--max-turns', '10'],
-    outputFormat: 'json',
-    resultField: 'result',
-    coordinator: 0,
-    env: {
-      ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
-      ANTHROPIC_AUTH_TOKEN: '${DEEPSEEK_API_KEY}',
-      ANTHROPIC_API_KEY: '${DEEPSEEK_API_KEY}',
-    },
-  },
-  {
-    // MiniMax has no official agent CLI; its API is Anthropic-compatible, so it
-    // runs through the installed Claude Code CLI against the MiniMax endpoint.
-    id: 'minimax',
-    name: 'MiniMax (via Claude Code)',
-    kind: 'custom',
-    command: 'claude',
-    args: ['-p', '{prompt}', '--output-format', 'json', '--max-turns', '10'],
-    outputFormat: 'json',
-    resultField: 'result',
-    coordinator: 0,
-    env: {
-      ANTHROPIC_BASE_URL: 'https://api.minimax.io/anthropic',
-      ANTHROPIC_AUTH_TOKEN: '${MINIMAX_API_KEY}',
-      ANTHROPIC_API_KEY: '${MINIMAX_API_KEY}',
-    },
-  },
-] as const;
-
 export const DEFAULT_ORGANIZATION_ID = 'default-org';
-
-const BUILTIN_OPTION_TEMPLATES: Record<string, RuntimeOptionTemplates> = {
-  claude: {
-    model: ['--model', '{value}'],
-    effort: ['--effort', '{value}'],
-  },
-  codex: {
-    model: ['--model', '{value}'],
-    effort: ['-c', 'model_reasoning_effort={value}'],
-  },
-  kimi: {
-    // Kimi CLI exposes thinking as a boolean launch flag, not a valued option:
-    // any truthy effort selection appends `--thinking`.
-    effort: ['--thinking'],
-  },
-  deepseek: {
-    model: ['--model', '{value}'],
-  },
-  minimax: {
-    model: ['--model', '{value}'],
-  },
-};
-
-/**
- * Provider-accurate dropdown choices, verified against official provider docs
- * (August 2026). Only keys with a matching option template emit CLI flags.
- */
-const BUILTIN_OPTION_VALUES: Record<string, RuntimeOptionChoices> = {
-  claude: {
-    model: ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-haiku-4-5'],
-    // Note: claude-haiku-4-5 rejects --effort; leave effort unset for Haiku agents.
-    effort: ['low', 'medium', 'high', 'xhigh'],
-  },
-  codex: {
-    model: ['gpt-5.1-codex-max', 'gpt-5.1-codex', 'gpt-5.1-codex-mini'],
-    // gpt-5.1-codex-mini accepts only low/medium/high.
-    effort: ['none', 'low', 'medium', 'high', 'xhigh'],
-  },
-  kimi: {
-    // Kimi switches models interactively via /model; thinking is a boolean flag.
-    effort: ['high'],
-  },
-  deepseek: {
-    // Legacy aliases deepseek-chat / deepseek-reasoner were retired July 2026.
-    model: ['deepseek-v4-pro', 'deepseek-v4-flash'],
-  },
-  minimax: {
-    // Speed is a model choice: each -highspeed variant ~100 tps vs ~60 tps standard.
-    model: [
-      'MiniMax-M3',
-      'MiniMax-M2.7',
-      'MiniMax-M2.7-highspeed',
-      'MiniMax-M2.5',
-      'MiniMax-M2.5-highspeed',
-      'MiniMax-M2.1',
-      'MiniMax-M2.1-highspeed',
-      'MiniMax-M2',
-    ],
-  },
-};
 
 const BUILTIN_SKILLS = [
   {
@@ -558,7 +420,13 @@ const BUILTIN_EXECUTIVES = [
     runtimeId: 'codex',
     authorityLevel: 80,
     canDelegate: true,
-    model: 'gpt-5.1-codex',
+    // gpt-5.6-terra: the balanced, everyday-work tier — the same relative
+    // position (not the flagship, not the cheapest) the retired gpt-5.1-codex
+    // held before this task's re-verification found it gone from the current
+    // model docs. Reaches fresh installs only: model is an owner's-choice
+    // field, never rewritten by reseed (spec 4.1.3) — correct behavior, not
+    // a shortfall, see the runtime-registry commit's follow-up note.
+    model: 'gpt-5.6-terra',
     speed: null,
     effort: 'medium',
     skillIds: ['skill-taste', 'skill-awesome-design'],
@@ -591,6 +459,8 @@ function mapAgent(row: AgentRow): AgentRuntime {
     kind: row.kind,
     command: row.command,
     argsTemplate: JSON.parse(row.args_json) as string[],
+    acpCommand: row.acp_command,
+    acpArgs: JSON.parse(row.acp_args_json || '[]') as string[],
     promptTransport: row.prompt_transport,
     outputFormat: row.output_format,
     resultField: row.result_field,
@@ -892,6 +762,16 @@ export function createDatabase(filename: string): OrchestratorDatabase {
         connection.prepare('UPDATE agents SET env_json = ? WHERE id = ?').run(JSON.stringify(current), agent.id);
       }
     }
+    for (const agent of BUILTIN_AGENTS) {
+      // Backfill for builtin runtimes seeded before the ACP columns existed.
+      // Guarded on NULL rather than on the row's other columns: NULL is the
+      // precise "never set" state, so an owner's own adapter is never
+      // overwritten. Same posture as the env and option backfills above.
+      if (!agent.acpCommand) continue;
+      connection
+        .prepare('UPDATE agents SET acp_command = ?, acp_args_json = ? WHERE id = ? AND acp_command IS NULL')
+        .run(agent.acpCommand, JSON.stringify(agent.acpArgs), agent.id);
+    }
     for (const skill of BUILTIN_SKILLS) {
       seedSkill.run(
         skill.id,
@@ -1053,6 +933,8 @@ export function createDatabase(filename: string): OrchestratorDatabase {
         kind: 'custom',
         command: input.command,
         argsTemplate: input.argsTemplate,
+        acpCommand: input.acpCommand ?? null,
+        acpArgs: input.acpArgs ?? [],
         promptTransport: input.promptTransport ?? 'argument',
         outputFormat: input.outputFormat ?? 'text',
         resultField: input.resultField ?? null,
@@ -1069,10 +951,11 @@ export function createDatabase(filename: string): OrchestratorDatabase {
       connection
         .prepare(`
           INSERT INTO agents (
-            id, name, kind, command, args_json, prompt_transport, output_format,
+            id, name, kind, command, args_json, acp_command, acp_args_json,
+            prompt_transport, output_format,
             result_field, version_args_json, option_templates_json, option_values_json,
             env_json, enabled, is_coordinator, timeout_ms, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
         `)
         .run(
           runtime.id,
@@ -1080,6 +963,8 @@ export function createDatabase(filename: string): OrchestratorDatabase {
           runtime.kind,
           runtime.command,
           JSON.stringify(runtime.argsTemplate),
+          runtime.acpCommand,
+          JSON.stringify(runtime.acpArgs),
           runtime.promptTransport,
           runtime.outputFormat,
           runtime.resultField,

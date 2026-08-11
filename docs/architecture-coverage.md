@@ -26,6 +26,7 @@ unmentioned; it cannot tell whether what the document says about them is true.
 - `src/server/governance-policy.ts` — documented as "override register"
 - `src/server/governance-repository.ts` — documented as "sealed until every required review is in"
 - `src/server/governance-service.ts` — documented as "P0 escalation"
+- `src/server/governance-api.ts` — documented as "governance engine"
 - `src/server/acp/connection.ts` — documented as "newline-delimited"
 - `src/server/run-prompt.ts` — documented as "three tiers"
 - `src/server/run-repository.ts` — documented as "every update in sequence"

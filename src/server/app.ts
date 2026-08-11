@@ -11,6 +11,7 @@ import type { OrchestratorDatabase } from './database.js';
 import { createHierarchyOrchestrator } from './hierarchy.js';
 import { registerPlatformApi, type ExportFailureLogger } from './platform-api.js';
 import { registerWorkApi } from './work-api.js';
+import { registerGovernanceApi } from './governance-api.js';
 import { probeAgentRuntimes } from './runtime-health.js';
 import type { PlatformEvent } from '../shared/platform.js';
 
@@ -90,6 +91,8 @@ const agentSchema = z.object({
   name: z.string().trim().min(1).max(120),
   command: z.string().trim().min(1).max(1_000),
   argsTemplate: z.array(z.string().max(20_000)).max(100),
+  acpCommand: z.string().trim().min(1).max(1_000).nullable().optional(),
+  acpArgs: z.array(z.string().max(20_000)).max(100).optional(),
   promptTransport: z.enum(['argument', 'stdin']).optional(),
   outputFormat: z.enum(['text', 'json', 'jsonl']).optional(),
   resultField: z.string().trim().max(200).nullable().optional(),
@@ -163,12 +166,30 @@ export function buildApp({
       message === 'Trusted user does not own this portfolio' ||
       message === 'Trusted user does not own this idempotency key' ||
       message.startsWith('Access denied:') ||
-      message.startsWith('Action not permitted for role')
+      message.startsWith('Action not permitted for role') ||
+      // governance: who may act, not whether the underlying data exists.
+      message.includes('is not a reviewer on') ||
+      message.endsWith('(checked again when the review was filed)') ||
+      message.includes('may adjudicate:') ||
+      message.includes('by the builder; it goes to the owner') ||
+      message === 'Only the reviewer who raised the finding may contest the ruling on it' ||
+      message.startsWith('Only the owner may resolve a P0 escalation:')
     ) {
       void reply.code(403).send({ error: message });
       return;
     }
-    if (message === 'Idempotency key conflicts with another request') {
+    if (
+      message === 'Idempotency key conflicts with another request' ||
+      // governance: the request is well-formed but the process has not
+      // reached, or has already passed, the point where it applies.
+      message.includes('assign another before adjudicating') ||
+      message.startsWith('All reviews must be filed before adjudication:') ||
+      message.startsWith('This finding has a final ruling and cannot be reopened:') ||
+      message.startsWith('This finding has already been ruled on; only a contest reopens it:') ||
+      message === 'There is no ruling to contest on this finding yet' ||
+      message.includes('has already contested this ruling; a reviewer may contest once') ||
+      message.startsWith('This escalation is already resolved:')
+    ) {
       void reply.code(409).send({ error: message });
       return;
     }
@@ -211,7 +232,15 @@ export function buildApp({
       message.startsWith('Hierarchy exceeds maximum depth') ||
       message.startsWith('Hierarchy runs support at most') ||
       message.startsWith('Organizational agent is not assigned to project:') ||
-      message.startsWith('Agent runtime is disabled:')
+      message.startsWith('Agent runtime is disabled:') ||
+      // governance: the submitted content itself is incomplete, not who sent
+      // it or what state the record is in.
+      message === 'A review must answer the gate checklist; an empty checklist is not a review' ||
+      message.startsWith('"Not applicable" is an answer; silence is not.') ||
+      message.startsWith('A finding needs evidence at file:line:') ||
+      message.startsWith('A finding needs a predicted failure, or it is a worry:') ||
+      message.includes('without them it is a finding dropped') ||
+      message.includes("is not on this project's ladder")
     ) {
       void reply.code(400).send({ error: message });
       return;
@@ -373,10 +402,19 @@ export function buildApp({
   });
 
   registerWorkApi(app, database, { currentUserId, supervisor });
+  registerGovernanceApi(app, database, { currentUserId });
 
   if (supervisor) {
     // Registered last so the plugin is in place before the route it serves.
-    void app.register(websocket).then(() => {
+    //
+    // `after` and not `.then()`: the Fastify instance is a thenable, so awaiting
+    // it — or attaching a `then` to it — starts the boot from inside the builder.
+    // A plugin the caller registers on the app we return (@fastify/static, under
+    // `npm start`) would then resolve against that already-running boot without
+    // actually loading, and the boot would never finish. `after` queues the same
+    // ordering without resolving anything.
+    app.register(websocket);
+    app.after(() => {
       registerRealtime(app, { database, supervisor, currentUserId });
     });
   }

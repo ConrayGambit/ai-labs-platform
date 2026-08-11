@@ -5,6 +5,8 @@ import {
   overrideReference,
   reviewIsVisibleTo,
   type AssignRoleInput,
+  type CardHandover,
+  type CardSpecification,
   type ChecklistAnswer,
   type FileReviewInput,
   type Finding,
@@ -29,6 +31,9 @@ import {
   type SpecificationSection,
   type SpecificationSections,
 } from './governance-policy.js';
+
+/** Declared in `../shared/governance.js`; re-exported because this module is where existing callers import it from. */
+export type { CardSpecification, CardHandover } from '../shared/governance.js';
 
 interface AssignmentRow {
   id: string;
@@ -78,6 +83,14 @@ export interface GovernanceRepository {
    */
   insertReviewRecord(input: FileReviewInput): Review;
   getReview(reviewId: string): Review | null;
+  /**
+   * The id of the card a finding belongs to, or null if the finding does not
+   * exist. A query over data this repository already owns, not a rule — a
+   * route keyed by a finding id resolves its card here and checks access the
+   * same way a route keyed by a card id already does, so an unknown finding
+   * and one whose card is unreachable read the same.
+   */
+  getFindingCardId(findingId: string): string | null;
   /**
    * Every review ever filed at this gate, superseded ones included. The record
    * of what was believed at the time is itself evidence (spec 20.5).
@@ -194,12 +207,6 @@ const mapReview = (row: ReviewRow, findings: Finding[]): Review => ({
   filedAt: row.filed_at,
 });
 
-export interface CardSpecification {
-  cardId: string;
-  sections: SpecificationSections;
-  updatedAt: string;
-}
-
 interface ReportRow {
   report_date: string;
   sections_json: string;
@@ -211,12 +218,6 @@ const mapReport = (row: ReportRow): AdjudicationReport => ({
   sections: JSON.parse(row.sections_json) as AdjudicationReport['sections'],
   builtAt: row.built_at,
 });
-
-export interface CardHandover {
-  cardId: string;
-  points: HandoverPoints;
-  updatedAt: string;
-}
 
 export interface AppendOverrideInput {
   findingId: string | null;
@@ -425,6 +426,39 @@ export function createGovernanceRepository(connection: Database.Database): Gover
       card: card.reviewer_count_override,
       project: project?.reviewer_count_override ?? null,
     });
+  };
+
+  /**
+   * The deadline that can unseal a gate — the latest deadline among reviewers
+   * who have NOT yet filed — or null if it cannot unseal on time alone yet.
+   *
+   * The deadline that can unseal the gate belongs to a reviewer who has NOT
+   * filed. Taking the minimum across every assignment let a stale deadline on
+   * somebody who had already filed open the seal while another reviewer was
+   * still working — the deadline unsealing the gate it exists to keep shut,
+   * which is the opposite of the rule.
+   *
+   * Every outstanding reviewer must be out of time, not merely one of them: a
+   * single outstanding reviewer with no deadline at all means the gate cannot
+   * unseal on time yet, however late the others are running.
+   *
+   * Shared by listVisibleReviews and getGateSealState so exactly one module
+   * decides sealing, rather than two independently-maintained copies of the
+   * same rule.
+   */
+  const outstandingDeadlineAt = (
+    cardId: string,
+    gateId: GateId,
+    filedIds: ReadonlySet<string>,
+  ): string | null => {
+    const stillOut = listReviewers(cardId, gateId)
+      .filter((assignment) => !filedIds.has(assignment.orgAgentId));
+    const outstandingDeadlines = stillOut
+      .map((assignment) => assignment.reviewDeadlineAt)
+      .filter((deadline): deadline is string => deadline !== null);
+    return stillOut.length > 0 && outstandingDeadlines.length === stillOut.length
+      ? outstandingDeadlines.reduce((latest, deadline) => (deadline > latest ? deadline : latest))
+      : null;
   };
 
   /**
@@ -696,6 +730,17 @@ export function createGovernanceRepository(connection: Database.Database): Gover
       return row ? mapReview(row, findingsFor(row.id)) : null;
     },
 
+    getFindingCardId(findingId) {
+      const row = connection
+        .prepare(
+          `SELECT r.card_id AS cardId FROM review_findings f
+             JOIN reviews r ON r.id = f.review_id
+            WHERE f.id = ?`,
+        )
+        .get(findingId) as { cardId: string } | undefined;
+      return row?.cardId ?? null;
+    },
+
     listReviews: (cardId, gateId) =>
       (connection
         .prepare('SELECT * FROM reviews WHERE card_id = ? AND gate_id = ? ORDER BY filed_at, id')
@@ -724,22 +769,7 @@ export function createGovernanceRepository(connection: Database.Database): Gover
       // would let one reviewer unseal the gate by filing twice.
       const filedReviewerIds = [...new Set(current.map((review) => review.reviewerOrgAgentId))];
       const filedIds = new Set(filedReviewerIds);
-      /*
-       * The deadline that can unseal the gate belongs to a reviewer who has NOT
-       * filed. Taking the minimum across every assignment let a stale deadline
-       * on somebody who had already filed open the seal while another reviewer
-       * was still working — the deadline unsealing the gate it exists to keep
-       * shut, which is the opposite of the rule.
-       */
-      const stillOut = listReviewers(cardId, gateId)
-        .filter((assignment) => !filedIds.has(assignment.orgAgentId));
-      const outstandingDeadlines = stillOut
-        .map((assignment) => assignment.reviewDeadlineAt)
-        .filter((deadline): deadline is string => deadline !== null);
-      // Every outstanding reviewer must be out of time, not merely one of them.
-      const deadlineAt = stillOut.length > 0 && outstandingDeadlines.length === stillOut.length
-        ? outstandingDeadlines.reduce((latest, deadline) => (deadline > latest ? deadline : latest))
-        : null;
+      const deadlineAt = outstandingDeadlineAt(cardId, gateId, filedIds);
       const now = new Date().toISOString();
 
       return current.filter((review) => reviewIsVisibleTo({
@@ -758,16 +788,7 @@ export function createGovernanceRepository(connection: Database.Database): Gover
       const current = listCurrentReviews(cardId, gateId);
       const filedReviewerIds = [...new Set(current.map((review) => review.reviewerOrgAgentId))];
       const filedIds = new Set(filedReviewerIds);
-      const stillOut = listReviewers(cardId, gateId)
-        .filter((assignment) => !filedIds.has(assignment.orgAgentId));
-      const outstandingDeadlines = stillOut
-        .map((assignment) => assignment.reviewDeadlineAt)
-        .filter((deadline): deadline is string => deadline !== null);
-      // Every outstanding reviewer must be out of time, not merely one of
-      // them — the same rule listVisibleReviews applies below.
-      const deadlineAt = stillOut.length > 0 && outstandingDeadlines.length === stillOut.length
-        ? outstandingDeadlines.reduce((latest, deadline) => (deadline > latest ? deadline : latest))
-        : null;
+      const deadlineAt = outstandingDeadlineAt(cardId, gateId, filedIds);
       const now = new Date().toISOString();
       const lapsed = deadlineAt !== null && now > deadlineAt;
       const sealed = required >= 2 && filedReviewerIds.length < required && !lapsed;

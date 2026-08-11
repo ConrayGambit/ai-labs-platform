@@ -90,6 +90,51 @@ describe('the card API', () => {
     expect(database!.work.getCard(cardId)?.status).toBe('backlog');
   });
 
+  it('moves a card out of a gate once its one required review is filed', async () => {
+    const { project } = seed();
+    const created = await app!.inject({
+      method: 'POST', url: '/api/cards',
+      payload: { projectId: project.id, title: 'Survey the field' },
+    });
+    const cardId = (created.json() as { card: { id: string } }).card.id;
+
+    // Entering a gate is free: no review, artifact or specification needed.
+    const entered = await app!.inject({
+      method: 'POST', url: `/api/cards/${cardId}/move`, payload: { to: 'G2', position: 0 },
+    });
+    expect(entered.statusCode).toBe(200);
+
+    // G2 asks for exactly one review (the product ladder default) and needs
+    // neither a specification nor the owner's signature, so filing that one
+    // review is the only thing standing between this card and leaving G2.
+    const runtime = database!.createAgent({
+      name: 'Runtime reviewer', command: 'runtime-reviewer', argsTemplate: ['{prompt}'],
+      promptTransport: 'argument', outputFormat: 'text',
+      versionArgs: ['--version'], timeoutMs: 120_000,
+    });
+    const reviewer = database!.createOrgAgent({
+      name: 'Reviewer', jobTitle: 'Specialist', department: 'Research',
+      jobFunction: 'Reviews the work.', responsibilities: 'Review.',
+      runtimeId: runtime.id, model: 'model-reviewer',
+    });
+    database!.governance.assignRole({ cardId, gateId: 'G2', role: 'reviewer', orgAgentId: reviewer.id });
+    database!.governance.insertReviewRecord({
+      cardId, gateId: 'G2', reviewerOrgAgentId: reviewer.id, verdict: 'approve',
+      checklist: [{ item: 'Does it meet the acceptance criteria?', answer: 'Yes.' }],
+      whatToPreserve: '', questionsForBuilder: '', findings: [],
+    });
+
+    const response = await app!.inject({
+      method: 'POST', url: `/api/cards/${cardId}/move`, payload: { to: 'G3', position: 0 },
+    });
+
+    // The one review G2 requires is filed. A refusal here would mean the
+    // route resolved reviewsFiled from something other than the record just
+    // written — the same "Gate refused the move" a hardcoded 0 always gives.
+    expect(response.statusCode).toBe(200);
+    expect(database!.work.getCard(cardId)?.gateId).toBe('G3');
+  });
+
   it('REFUSES every card route to a user with no access to the venture', async () => {
     const { project } = seed(
       // A real user of this platform, with no grant on this project's venture.
@@ -108,11 +153,28 @@ describe('the card API', () => {
   });
 
   it('gives the same answer for a card that does not exist as for one you may not see', async () => {
-    seed();
+    const { project } = seed();
+    const cardId = database!.work.createCard({ projectId: project.id, title: 'Survey the field' }).id;
+    // Reconnect as a real user of the platform with no grant on this
+    // project's venture, so the card genuinely exists but sits outside what
+    // this actor may reach.
+    await app!.close();
+    const outsider = database!.identity.createUser({ displayName: 'Outsider', role: 'staff' });
+    app = buildApp({ database: database!, invoke: async () => 'unused', currentUserId: outsider.id });
 
-    const response = await app!.inject({ method: 'GET', url: '/api/cards/no-such-card' });
+    const unknown = await app!.inject({ method: 'GET', url: '/api/cards/no-such-card' });
+    const inaccessible = await app!.inject({ method: 'GET', url: `/api/cards/${cardId}` });
 
-    expect(response.json()).toMatchObject({ error: expect.stringMatching(/access denied/i) });
+    // The error handler maps any "Access denied:" message to 403 with
+    // { error }. assertProjectAccess must not let assertVentureAccess's own
+    // message — which names the actor and the venture — escape uncaught:
+    // both branches need the identical "Access denied: card <id>" shape, not
+    // just the same status code, or a caller comparing the two bodies learns
+    // which cards exist and which venture owns them.
+    expect(unknown.statusCode).toBe(403);
+    expect(inaccessible.statusCode).toBe(403);
+    expect(unknown.json().error).toMatch(/^Access denied: card /);
+    expect(inaccessible.json().error).toMatch(/^Access denied: card /);
   });
 
   it('REFUSES to start a run when no supervisor is configured', async () => {

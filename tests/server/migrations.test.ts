@@ -60,4 +60,15 @@ describe('migration ledger', () => {
       .get();
     expect(table).toBeUndefined();
   });
+
+  it('adds the ACP invocation columns to agents', () => {
+    connection = new Database(':memory:');
+    applyMigrations(connection);
+    const columns = connection
+      .prepare("SELECT name FROM pragma_table_info('agents')")
+      .all() as Array<{ name: string }>;
+    const names = columns.map((column) => column.name);
+    expect(names).toContain('acp_command');
+    expect(names).toContain('acp_args_json');
+  });
 });

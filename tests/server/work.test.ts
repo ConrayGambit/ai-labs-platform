@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 import { columnKeyFor, PRODUCT_LADDER } from '../../src/server/gate-policy.js';
 import type { WorkProject } from '../../src/shared/platform.js';
-import { effectiveReviewerCount } from '../../src/shared/work.js';
+import { columnKeyForCard, effectiveReviewerCount } from '../../src/shared/work.js';
 
 describe('the card model, the owner notes and the activity log', () => {
   let database: OrchestratorDatabase | undefined;
@@ -274,5 +274,36 @@ describe('the card model, the owner notes and the activity log', () => {
       expect.objectContaining({ kind: 'created' }),
       expect.objectContaining({ kind: 'artifact_attached' }),
     ]);
+  });
+});
+
+// The client-safe mirror of gate-policy.ts's columnKeyFor (client code cannot
+// import server files). Every case is checked against the server's own
+// function too, so a future edit to either cannot drift without failing here.
+describe('columnKeyForCard, the shared column mapping both view files import', () => {
+  it('matches a non-review status directly, the same as columnKeyFor', () => {
+    const card = { status: 'in_progress' as const, gateId: null };
+    expect(columnKeyForCard(card, PRODUCT_LADDER)).toBe('in_progress');
+    expect(columnKeyForCard(card, PRODUCT_LADDER)).toBe(columnKeyFor(card));
+  });
+
+  it('matches a review card to its recorded gate, the same as columnKeyFor', () => {
+    const card = { status: 'review' as const, gateId: 'G2' as const };
+    expect(columnKeyForCard(card, PRODUCT_LADDER)).toBe('G2');
+    expect(columnKeyForCard(card, PRODUCT_LADDER)).toBe(columnKeyFor(card));
+  });
+
+  it("falls back to the ladder's first gate for a review card with no gate — columnKeyFor's own fallback, not a client invention", () => {
+    const card = { status: 'review' as const, gateId: null };
+    expect(columnKeyForCard(card, PRODUCT_LADDER)).toBe('G1');
+    expect(columnKeyForCard(card, PRODUCT_LADDER)).toBe(columnKeyFor(card, PRODUCT_LADDER));
+  });
+
+  it('returns the review status itself, never inventing a column, when the ladder has no gates to fall back to', () => {
+    // columnKeyFor throws here (correct for a request handler); a render
+    // path cannot blank the whole board over one card, so this returns a
+    // value — 'review' — that can never equal a real BoardColumnKey, which
+    // is what lets a caller detect and surface the card instead.
+    expect(columnKeyForCard({ status: 'review', gateId: null }, { gates: [] })).toBe('review');
   });
 });

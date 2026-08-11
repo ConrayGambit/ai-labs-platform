@@ -13,7 +13,7 @@
   background: #08090a;
   accent-color: var(--accent);
   caret-color: var(--accent);
-  scrollbar-color: #2a2c31 transparent;
+  scrollbar-color: var(--rule-graphite) transparent;
   scrollbar-width: thin;
   --canvas: #08090a;
   --text: #f7f8f8;
@@ -24,6 +24,8 @@
   --accent-dark: #5e6ad2;
   --border: rgba(255, 255, 255, 0.08);
   --border-subtle: rgba(255, 255, 255, 0.05);
+  --rule-graphite: #2a2c31;
+  --rule-graphite-hover: #3a3d44;
 }
 
 * { box-sizing: border-box; }
@@ -35,8 +37,8 @@ button { color: inherit; }
 ::selection { background: rgba(113, 112, 255, .28); color: var(--text); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: #2a2c31; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: #3a3d44; background-clip: content-box; }
+::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: var(--rule-graphite); background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--rule-graphite-hover); background-clip: content-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* Every interactive element carries a visible focus ring. This is the one accent
@@ -53,7 +55,8 @@ button { color: inherit; }
 .org-quick-row small, .run-detail small, .skill-category-title, .skill-details summary,
 .skill-details p, .skill-link, .tuning-fieldset legend, .skill-option strong,
 .skill-option small, .options-editor label, .runtime-endpoint,
-.runtime-card > span:last-child, .runtime-card-head > span:last-child {
+.runtime-card > span:last-child, .runtime-card-head > span:last-child,
+.detail-heading, .field-label, .run-connection {
   font-family: var(--font-small);
 }
 
@@ -189,6 +192,12 @@ button { color: inherit; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 .ghost-button { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; background: rgba(255,255,255,.02); color: var(--muted); font-size: 12px; cursor: pointer; }
 .ghost-button:hover { color: var(--secondary); background: rgba(255,255,255,.04); }
+/* Pre-existing gap: a disabled .ghost-button (e.g. "Saving..." above) carried
+   no visual disabled state at all, same 45%/not-allowed language as every
+   other disabled control in this file (.task-action, .agent-form input). The
+   run panel's cancel control is the first disabled ghost-button that must
+   read as unavailable rather than merely inert, which is what surfaced it. */
+.ghost-button:disabled { cursor: not-allowed; opacity: .45; }
 .primary-button:disabled { cursor: wait; opacity: .6; }
 
 @media (max-width: 760px) {
@@ -228,7 +237,13 @@ button { color: inherit; }
 .run-row { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); }
 .run-status { flex: 0 0 auto; padding: 3px 8px; border-radius: 999px; font: 500 9px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; background: rgba(255,255,255,.05); color: var(--muted); }
 .run-completed { background: rgba(39,166,68,.14); color: #a9e4c2; }
-.run-failed { background: rgba(226,92,92,.14); color: #ffc4c4; }
+/* .run-stopped shares .run-failed's treatment: the run panel's own RunStatus
+   (src/server/run-repository.ts) adds 'stopped' for a run the platform itself
+   halted (a cost ceiling crossed) — a limit breached, same as Breach Red's
+   own definition, not a distinct outcome. 'cancelled' needs no override: a
+   person's own deliberate stop is neither success nor breach, so it falls
+   through to .run-status's neutral base above. */
+.run-failed, .run-stopped { background: rgba(226,92,92,.14); color: #ffc4c4; }
 .run-running, .run-queued { background: rgba(216,167,62,.14); color: #ecd9a8; }
 .run-detail { min-width: 0; display: grid; gap: 3px; }
 .run-detail strong { overflow: hidden; color: var(--secondary); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
@@ -308,3 +323,167 @@ button { color: inherit; }
   .dashboard-columns { grid-template-columns: 1fr; }
   .three-columns { grid-template-columns: 1fr; }
 }
+
+/* Card board — the governed board. Columns come from the server (a project's
+   gate ladder decides how many), so the grid is sized by auto-flow rather
+   than .board's fixed repeat(6, ...): same minmax(220px, 1fr) column and
+   12px gap, and the same .content-area:has() scroll trick, generalized to
+   any column count instead of a hardcoded six. */
+.card-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 12px; }
+.content-area:has(.card-board) { overflow-x: auto; }
+.card-board-column { padding: 10px; border-radius: 8px; background: rgba(255,255,255,.015); border: 1px solid var(--border-subtle); }
+.board-card-stack { display: grid; gap: 8px; }
+.board-card { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); text-align: left; cursor: pointer; }
+.board-card:hover { background: rgba(255,255,255,.04); }
+/* Spans, not h3/p: a <button>'s content model is phrasing content only, and
+   block elements inside one are both invalid and fold into its accessible
+   name. display:block keeps the stacked layout without the flow elements. */
+.board-card-title { display: block; margin: 8px 0 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--secondary); }
+.board-card-description { display: block; margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--secondary); }
+/* Structural additions only — the box itself reuses .error-banner verbatim
+   (same object as any other refused/invalid state, per DESIGN.md's own
+   "the banner and the inline field error are the same object at different
+   sizes"), applied alongside this class rather than duplicated here. */
+.board-unplaced { margin-bottom: 12px; }
+.board-unplaced ul { display: grid; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; }
+.board-unplaced button { border: 0; background: transparent; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font-size: 13px; }
+
+/* Card detail — the dialog opened from a board card. The shell (.dialog,
+   .dialog-heading, .icon-button), the field styling (.form-error,
+   .dialog-actions, .ghost-button, .primary-button) are all reused as-is;
+   only the content below the heading is new. */
+.card-detail-body { display: grid; gap: 24px; padding: 24px; }
+.detail-meta { display: flex; align-items: center; gap: 8px; }
+.detail-status-label { font-size: 12px; font-weight: 500; color: var(--muted); }
+.detail-section { display: grid; gap: 12px; }
+/* Label type (11px/500/0.06em/uppercase): section headings, field labels,
+   and specification section names all name what follows them. */
+.detail-heading, .field-label { margin: 0; color: var(--quiet); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+.detail-prose { margin: 0; color: var(--secondary); font-size: 13px; line-height: 1.5; }
+.detail-empty { margin: 0; color: var(--quiet); font-size: 13px; line-height: 1.5; }
+.detail-field { display: grid; gap: 8px; }
+/* input added alongside textarea/select: the same Input component
+   (DESIGN.md's `components.input` token) this pair already implements, just
+   never previously needed by a plain text field here — the run panel's
+   token-ceiling field is the first. */
+.detail-field textarea, .detail-field select, .detail-field input { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; outline: none; background: rgba(255,255,255,.025); color: var(--secondary); font-size: 12px; resize: vertical; }
+.detail-field textarea:focus, .detail-field select:focus, .detail-field input:focus { border-color: rgba(113,112,255,.7); box-shadow: 0 0 0 3px rgba(113,112,255,.09); }
+.detail-field textarea:disabled, .detail-field input:disabled { opacity: .45; cursor: not-allowed; }
+.card-pill { display: inline-block; padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,.025); color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; white-space: nowrap; }
+.spec-list { display: grid; gap: 8px; }
+.spec-row { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.spec-row dd { margin: 0; color: var(--secondary); font-size: 13px; line-height: 1.5; }
+.activity-list, .artifact-list { display: grid; gap: 8px; }
+.activity-row, .artifact-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.activity-detail, .artifact-label { color: var(--secondary); font-size: 13px; }
+/* Mono, not Text: a timestamp and an actor id are machine facts, same as the
+   file path in .artifact-location below — "Mono Means Machine." */
+.activity-meta, .artifact-location { margin-left: auto; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
+
+/* Run panel — watching a live run and starting a new one, inside the card
+   detail dialog. Chrome stays neutral throughout (Veil/Rule Hairline, same
+   language as .spec-row/.activity-row above); the only colour is two small
+   Live dot markers, using the exact token DESIGN.md documents for a live
+   thing (box-shadow: 0 0 10px currentColor) rather than a tinted surface —
+   "a surface never colours itself... a panel earns importance with
+   position, rule weight and type, not with a tint." "Start a run" itself is
+   DESIGN.md's own named example of the Row action component (.task-action,
+   defined above under Card board), reused verbatim rather than styled anew. */
+.run-panel { display: grid; gap: 12px; }
+.run-connection { margin: 0; color: var(--quiet); font-size: 11px; }
+/* A refused request this panel just made — answering, cancelling, or the
+   initial subscribe — reuses .form-error verbatim (the same object as any
+   other refused/invalid state); this wrapper only stacks more than one. */
+.run-refusals { display: grid; gap: 8px; }
+.run-panel-status { display: flex; align-items: center; gap: 8px; }
+.run-live-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+/* Pending Amber: "in progress, queued, running" (DESIGN.md, Secondary colours) — a live run, exactly. */
+.run-live-dot-running { background: #d8a73e; color: #d8a73e; }
+/* Signal Indigo: "marks... an item awaiting a human signature" (DESIGN.md, Primary colours) — a pending permission, exactly. The one accent use in this panel. */
+.run-live-dot-permission { background: #7170ff; color: #7170ff; }
+.run-cost-figure { margin-left: auto; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
+/* Full Rule Hairline (var(--border), 8%) rather than the faint 5% .spec-row
+   uses — the stronger weight is the sanctioned way to read as the more
+   consequential block on this panel, in place of a tint. */
+.run-permission { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); }
+.run-permission-heading { display: flex; align-items: center; gap: 8px; }
+.run-permission-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.transcript-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; max-height: 360px; overflow-y: auto; }
+.transcript-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.transcript-text { color: var(--secondary); font-size: 13px; line-height: 1.5; }
+/* Body size, not .form-note's 10px: DESIGN.md's Small Type Is Earned Rule —
+   "never put anything there that a person must read to make a decision."
+   The core's own reason a control is unavailable (why Cancel or an answer
+   cannot go through, why starting a run needs an assignee first) is exactly
+   that; .form-note itself is unchanged for its other, lower-stakes uses. */
+.run-note { margin: 0; color: var(--quiet); font-size: 13px; line-height: 1.5; }
+/* Same divider language as .options-editor above: a Rule Hairline Faint
+   separates the "start a new run" region from whatever this panel is
+   already watching, on the panel's own grid gap rather than an added margin. */
+.run-start { border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+
+/* Review panel — the blind-review ladder inside the card detail dialog.
+   Blindness is a structural fact, not a status verdict, so the seal block
+   stays neutral (Rule Hairline + Veil 02 — the same "important without a
+   tint" language .run-permission already uses above) rather than borrowing a
+   status hue that does not describe it: DESIGN.md's Neutral Record Rule, "a
+   panel earns importance with position, rule weight and type, not a tint." */
+.review-panel { display: grid; gap: 12px; }
+.review-seal { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); }
+.review-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.review-row { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.review-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.review-checklist { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--secondary); }
+
+/* Findings panel — the P0-P4 ladder, with adopt / defer / override controls.
+   .finding-priority-p0 is the one rung that also takes colour: P0 is not
+   only the hardest priority but a state DESIGN.md names explicitly under
+   Breach Red ("blocked, failed, error, and the P0 stop"), so it is the one
+   place a finding takes a tint, mirroring .run-status's own neutral-base-
+   plus-one-state-override pattern above. P1-P4 stay the plain, neutral
+   .card-pill they are laid on top of, same as every other priority in this
+   system that is a degree rather than a status. */
+.finding-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.finding-row { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.finding-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.finding-priority-p0 { background: rgba(226,92,92,.14); color: #ffc4c4; }
+
+/* Escalation banner — the one place Breach Red is allowed to interrupt
+   (DESIGN.md: "the only colour permitted to interrupt"). The surface reuses
+   .error-banner verbatim (the same object as any other refused/invalid
+   state, just the most consequential instance of it, the way .board-unplaced
+   already reuses it above); this class adds only what .error-banner does not
+   carry — a heading, per-escalation rows and the resolve form. Text colour
+   is inherited from .error-banner throughout rather than restated. */
+.escalation-banner { display: grid; gap: 12px; padding: 16px; }
+/* .field-label forces Graphite Quiet, which is measured against the canvas
+   and the veil ladder — not against Breach Wash, where it lands under
+   DESIGN.md's own 4.5:1 floor. The two .field-label uses inside this banner
+   (the "P0 escalation" eyebrow, the "Resolution" field label) let the
+   inherited Breach Red Pale through instead, so the interrupt surface never
+   carries the dimmest text on the page. */
+.escalation-banner .field-label { color: inherit; }
+.escalation-text { margin: 0; font-size: 13px; line-height: 1.5; }
+.escalation-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.escalation-row { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid rgba(240,90,90,.25); }
+.escalation-row:first-child { padding-top: 0; border-top: 0; }
+.escalation-meta { margin: 0; font: 500 10px var(--font-mono); letter-spacing: .02em; }
+.escalation-resolve { display: grid; gap: 8px; }
+
+/* Override register — read-only, append-only, so nothing here is styled as
+   an affordance to edit. Rows reuse the same ledger-row language as
+   .spec-row/.activity-row above; "Superseded" is a plain .card-pill, neutral
+   like every other metadata marker, because supersession is a recorded fact
+   about the entry, not a breach or a warning. */
+.override-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.override-row { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.override-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* Adjudication report — eight fixed sections, always rendered, each a small
+   ledger of its own lines (or the shared "nothing recorded" placeholder).
+   Reuses .detail-section/.detail-heading for structure and the same row
+   language as .spec-row/.activity-row for each line. */
+.report-controls { display: flex; align-items: center; gap: 10px; }
+.report-sections { display: grid; gap: 20px; }
+.report-lines { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.report-line { margin: 0; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); color: var(--secondary); font-size: 13px; line-height: 1.5; }

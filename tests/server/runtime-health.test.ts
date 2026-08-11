@@ -10,6 +10,8 @@ function runtime(command: string): AgentRuntime {
     kind: 'custom',
     command,
     argsTemplate: ['{prompt}'],
+    acpCommand: null,
+    acpArgs: [],
     promptTransport: 'argument',
     outputFormat: 'text',
     resultField: null,
