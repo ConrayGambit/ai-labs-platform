@@ -6,6 +6,7 @@ import {
   getReviewState,
   moveCard,
   putNotes,
+  ServerRefusal,
 } from '../../src/web/api/client.js';
 
 function jsonResponse(body: unknown, status = 200): Promise<Response> {
@@ -138,10 +139,13 @@ describe('the API client', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/override-register?cardId=card-1');
   });
 
-  it('throws the server refusal verbatim, not a generic failure message', async () => {
+  it('throws the server refusal verbatim, as a ServerRefusal, not a generic failure message', async () => {
     fetchMock.mockReturnValueOnce(errorResponse(403, 'Access denied: card card-1'));
 
-    await expect(getCard('card-1')).rejects.toThrow('Access denied: card card-1');
+    const failure: unknown = await getCard('card-1').catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ServerRefusal);
+    expect((failure as Error).message).toBe('Access denied: card card-1');
   });
 
   it('carries the refusal verbatim from a different route too, not just one', async () => {
@@ -149,8 +153,24 @@ describe('the API client', () => {
       errorResponse(400, 'Gate refused the move: needs 1 review(s); 0 of 1 filed.'),
     );
 
-    await expect(moveCard('card-1', 'G2', 0)).rejects.toThrow(
-      'Gate refused the move: needs 1 review(s); 0 of 1 filed.',
-    );
+    const failure: unknown = await moveCard('card-1', 'G2', 0).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ServerRefusal);
+    expect((failure as Error).message).toBe('Gate refused the move: needs 1 review(s); 0 of 1 filed.');
+  });
+
+  // The server was never reached, so there are no "server's own words" to
+  // carry — a caller rendering ServerRefusal.message verbatim as the
+  // platform's refusal must not be handed a browser's own network-error text
+  // instead and mistake it for one.
+  it('distinguishes a transport failure from a server refusal', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const failure: unknown = await getCard('card-1').catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(ServerRefusal);
+    expect((failure as Error).message).not.toMatch(/failed to fetch/i);
+    expect((failure as Error).cause).toBeInstanceOf(TypeError);
   });
 });
