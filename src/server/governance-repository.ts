@@ -5,6 +5,8 @@ import {
   overrideReference,
   reviewIsVisibleTo,
   type AssignRoleInput,
+  type CardHandover,
+  type CardSpecification,
   type ChecklistAnswer,
   type FileReviewInput,
   type Finding,
@@ -29,6 +31,9 @@ import {
   type SpecificationSection,
   type SpecificationSections,
 } from './governance-policy.js';
+
+/** Declared in `../shared/governance.js`; re-exported because this module is where existing callers import it from. */
+export type { CardSpecification, CardHandover } from '../shared/governance.js';
 
 interface AssignmentRow {
   id: string;
@@ -194,12 +199,6 @@ const mapReview = (row: ReviewRow, findings: Finding[]): Review => ({
   filedAt: row.filed_at,
 });
 
-export interface CardSpecification {
-  cardId: string;
-  sections: SpecificationSections;
-  updatedAt: string;
-}
-
 interface ReportRow {
   report_date: string;
   sections_json: string;
@@ -211,12 +210,6 @@ const mapReport = (row: ReportRow): AdjudicationReport => ({
   sections: JSON.parse(row.sections_json) as AdjudicationReport['sections'],
   builtAt: row.built_at,
 });
-
-export interface CardHandover {
-  cardId: string;
-  points: HandoverPoints;
-  updatedAt: string;
-}
 
 export interface AppendOverrideInput {
   findingId: string | null;

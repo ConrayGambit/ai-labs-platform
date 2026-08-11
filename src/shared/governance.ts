@@ -290,3 +290,66 @@ export interface GateSealState {
 export interface GateReviewState extends GateSealState {
   visibleReviews: Review[];
 }
+
+/**
+ * The thirteen sections of a feature specification card (spec 20.5).
+ *
+ * Ordered keys rather than free text, so "the card is incomplete" is a
+ * computable fact instead of a judgement. The spec fixes the count and
+ * describes the contents; this list is the platform's reading of it, confirmed
+ * by the owner, and is the single place to correct should the operating
+ * protocol enumerate them differently.
+ */
+export const SPECIFICATION_SECTIONS = [
+  'problem',               // what is wrong today, in the owner's words
+  'outcome',               // what is true when this is done
+  'acceptance_criteria',   // demonstrable, on synthetic fixtures
+  'scope',                 // what this includes
+  'out_of_scope',          // what it deliberately does not
+  'constraints',           // limits that are not negotiable
+  'interfaces',            // what it consumes and what it produces
+  'data_and_migrations',   // schema changes and their rollback
+  'permissions_and_audit', // who may do what, and what is recorded
+  'failure_modes',         // how it fails, and what happens then
+  'verification',          // how it will be proven, including negative tests
+  'rollout_and_rollback',  // how it lands and how it is undone
+  'open_questions',        // what is not yet decided, named
+] as const;
+
+export type SpecificationSection = (typeof SPECIFICATION_SECTIONS)[number];
+
+export type SpecificationSections = Partial<Record<SpecificationSection, string>>;
+
+export interface CardSpecification {
+  cardId: string;
+  sections: SpecificationSections;
+  updatedAt: string;
+}
+
+/**
+ * The nine points of a handover report (spec 20.5).
+ *
+ * Two are named by the spec itself: `commands_and_actual_output` and
+ * `exact_next_work_item`. The rest are the platform's reading of it, confirmed
+ * by the owner.
+ */
+export const HANDOVER_POINTS = [
+  'what_changed',
+  'why',
+  'commands_and_actual_output',
+  'test_results',
+  'known_limitations',
+  'risks_and_residual_findings',
+  'deviations_from_the_specification',
+  'follow_up_items',
+  'exact_next_work_item',
+] as const;
+
+export type HandoverPoint = (typeof HANDOVER_POINTS)[number];
+export type HandoverPoints = Partial<Record<HandoverPoint, string>>;
+
+export interface CardHandover {
+  cardId: string;
+  points: HandoverPoints;
+  updatedAt: string;
+}
