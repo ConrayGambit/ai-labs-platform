@@ -28,10 +28,20 @@ function resolvePackageBin(packageName: string): string {
   let manifestPath: string;
   try {
     manifestPath = require.resolve(`${packageName}/package.json`);
-  } catch {
-    // Deliberately not re-thrown: the underlying MODULE_NOT_FOUND names a
-    // path inside this server, not the package an operator has to install.
-    throw new Error(`ACP adapter ${packageName} is not installed`);
+  } catch (error) {
+    // Only a missing module actually means "not installed" — that generic
+    // message is friendlier than MODULE_NOT_FOUND's, which names a path
+    // inside this server, not the package an operator has to install. Any
+    // other failure (e.g. ERR_PACKAGE_PATH_NOT_EXPORTED, thrown when a
+    // package's own `exports` map is scoped tightly enough to block the
+    // `/package.json` subpath) is a real, installed package this resolver
+    // just can't read; relabeling that "not installed" would send an
+    // operator to run a redundant `npm install` that fixes nothing, so it
+    // propagates unchanged instead.
+    if ((error as NodeJS.ErrnoException).code === 'MODULE_NOT_FOUND') {
+      throw new Error(`ACP adapter ${packageName} is not installed`);
+    }
+    throw error;
   }
   const manifest = require(manifestPath) as { bin?: string | Record<string, string> };
   const bin = manifest.bin;
