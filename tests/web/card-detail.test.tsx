@@ -160,6 +160,43 @@ describe('the card detail view', () => {
     expect(await screen.findByText('Gate refused the move: needs 1 review(s); 0 of 1 filed.')).toBeInTheDocument();
   });
 
+  it('offers every column as a move destination, including the one the card is already in', async () => {
+    render(<CardDetailView cardId="card-1" onClose={() => {}} />);
+    const select = await screen.findByLabelText(/move to/i) as HTMLSelectElement;
+    const optionLabels = Array.from(select.options).map((option) => option.textContent);
+    // card-1 is 'in_progress'. Withholding that option would be the client
+    // deciding a destination is invalid on its own reasoning rather than
+    // letting the server be the only place that ever refuses a move.
+    expect(optionLabels).toEqual([
+      'Choose a column…', 'Backlog', 'Ready', 'In progress', 'G1 design', 'Blocked', 'Done',
+    ]);
+  });
+
+  it('reports a successful move to its caller, so a board rendered elsewhere can refetch', async () => {
+    const onMoved = vi.fn();
+    render(<CardDetailView cardId="card-1" onClose={() => {}} onMoved={onMoved} />);
+    const select = await screen.findByLabelText(/move to/i);
+    fireEvent.change(select, { target: { value: 'ready' } });
+    fireEvent.click(screen.getByRole('button', { name: /^move$/i }));
+
+    await waitFor(() => expect(onMoved).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not report a move as moved when the server refused it', async () => {
+    const onMoved = vi.fn();
+    stubRoutes({
+      'POST /api/cards/card-1/move': () =>
+        jsonResponse({ error: 'Gate refused the move: needs 1 review(s); 0 of 1 filed.' }, 400),
+    });
+    render(<CardDetailView cardId="card-1" onClose={() => {}} onMoved={onMoved} />);
+    const select = await screen.findByLabelText(/move to/i);
+    fireEvent.change(select, { target: { value: 'ready' } });
+    fireEvent.click(screen.getByRole('button', { name: /^move$/i }));
+
+    await screen.findByText('Gate refused the move: needs 1 review(s); 0 of 1 filed.');
+    expect(onMoved).not.toHaveBeenCalled();
+  });
+
   it('calls onClose when the close control is activated', async () => {
     const onClose = vi.fn();
     render(<CardDetailView cardId="card-1" onClose={onClose} />);
@@ -172,5 +209,32 @@ describe('the card detail view', () => {
     vi.stubGlobal('fetch', vi.fn(() => jsonResponse({ error: 'Access denied: card card-1' }, 403)));
     render(<CardDetailView cardId="card-1" onClose={() => {}} />);
     expect(await screen.findByText('Access denied: card card-1')).toBeInTheDocument();
+  });
+
+  it('clears the pending "Saved ✓" reset timer on unmount, rather than leaking it', async () => {
+    // Wraps the real setTimeout so every timer in the app and in React/RTL's
+    // own internals still runs; only the id(s) this view's 2000ms resets
+    // schedule are captured, so this cannot pass on an unrelated timer.
+    const realSetTimeout = globalThis.setTimeout;
+    const scheduledIds: ReturnType<typeof setTimeout>[] = [];
+    const setSpy = vi.spyOn(globalThis, 'setTimeout')
+      .mockImplementation((...args: Parameters<typeof setTimeout>) => {
+        const id = realSetTimeout(...args);
+        if (args[1] === 2000) scheduledIds.push(id);
+        return id;
+      });
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+    const { unmount } = render(<CardDetailView cardId="card-1" onClose={() => {}} />);
+    const notes = await screen.findByLabelText(/owner notes/i);
+    fireEvent.change(notes, { target: { value: 'Edited just before closing the dialog.' } });
+    fireEvent.click(screen.getByRole('button', { name: /save notes/i }));
+    await waitFor(() => expect(scheduledIds).toHaveLength(1));
+
+    unmount();
+
+    expect(clearSpy).toHaveBeenCalledWith(scheduledIds[0]);
+    setSpy.mockRestore();
+    clearSpy.mockRestore();
   });
 });

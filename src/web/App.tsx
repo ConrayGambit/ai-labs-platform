@@ -1165,6 +1165,9 @@ export function App() {
   const [board, setBoard] = useState<KanbanBoard>(EMPTY_BOARD);
   const [view, setView] = useState<View>('dashboard');
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  // Bumped whenever a move inside CardDetailView lands, so CardBoardView
+  // refetches instead of the board quietly going stale behind the dialog.
+  const [boardRefreshToken, setBoardRefreshToken] = useState(0);
   const [showProjectCreate, setShowProjectCreate] = useState(false);
   const [showTaskCreate, setShowTaskCreate] = useState(false);
   const [showAgentCreate, setShowAgentCreate] = useState(false);
@@ -1451,7 +1454,11 @@ export function App() {
           )}
           {!loading && !error && view === 'cards' && (
             selectedProjectId ? (
-              <CardBoardView projectId={selectedProjectId} onOpenCard={setSelectedCardId} />
+              <CardBoardView
+                onOpenCard={setSelectedCardId}
+                projectId={selectedProjectId}
+                refreshToken={boardRefreshToken}
+              />
             ) : (
               <div className="empty-state">
                 <strong>No project selected</strong>
@@ -1497,7 +1504,11 @@ export function App() {
         <NewOrganizationDialog onClose={() => setShowOrganizationCreate(false)} onCreate={createOrganization} />
       )}
       {selectedCardId && (
-        <CardDetailView cardId={selectedCardId} onClose={() => setSelectedCardId(null)} />
+        <CardDetailView
+          cardId={selectedCardId}
+          onClose={() => setSelectedCardId(null)}
+          onMoved={() => setBoardRefreshToken((token) => token + 1)}
+        />
       )}
     </div>
   );

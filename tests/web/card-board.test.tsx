@@ -85,4 +85,73 @@ describe('the card board', () => {
     render(<CardBoardView projectId="project-1" onOpenCard={() => {}} />);
     expect(await screen.findByText('Access denied: project project-1')).toBeInTheDocument();
   });
+
+  it('refetches when refreshToken changes, rather than trusting a fetch made before a move landed', async () => {
+    const fetchMock = vi.fn()
+      .mockReturnValueOnce(jsonResponse(board))
+      .mockReturnValueOnce(jsonResponse({
+        ...board,
+        cards: [{ id: 'card-1', title: 'Wire the approval queue', status: 'ready', priority: 'high' }],
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = render(
+      <CardBoardView projectId="project-1" onOpenCard={() => {}} refreshToken={0} />,
+    );
+    await screen.findByText('Wire the approval queue');
+    expect(
+      screen.getByText('Wire the approval queue').closest('[data-column-key]')?.getAttribute('data-column-key'),
+    ).toBe('in_progress');
+
+    rerender(<CardBoardView projectId="project-1" onOpenCard={() => {}} refreshToken={1} />);
+
+    await waitFor(() => expect(
+      screen.getByText('Wire the approval queue').closest('[data-column-key]')?.getAttribute('data-column-key'),
+    ).toBe('ready'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("places a review card with no recorded gate at the ladder's first gate, not the fixed backlog column", async () => {
+    vi.stubGlobal('fetch', vi.fn(() => jsonResponse({
+      ...board,
+      cards: [{
+        id: 'card-nogate', title: 'Needs review, gate not yet recorded',
+        status: 'review', priority: 'medium', gateId: null,
+      }],
+    })));
+    render(<CardBoardView projectId="project-1" onOpenCard={() => {}} />);
+    const title = await screen.findByText('Needs review, gate not yet recorded');
+    expect(title.closest('[data-column-key]')?.getAttribute('data-column-key')).toBe('G1');
+  });
+
+  it('shows a card whose key matches no column on the board, rather than dropping it silently', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => jsonResponse({
+      ...board,
+      cards: [{
+        id: 'card-stray', title: 'Carries a gate this ladder does not have',
+        status: 'review', priority: 'low', gateId: 'G9',
+      }],
+    })));
+    render(<CardBoardView projectId="project-1" onOpenCard={() => {}} />);
+    expect(await screen.findByText('Carries a gate this ladder does not have')).toBeInTheDocument();
+    expect(screen.getByText(/match no column/i)).toBeInTheDocument();
+    // Not counted into any real column either.
+    const inProgressColumn = screen.getByText('In progress').closest('.card-board-column');
+    expect(inProgressColumn?.querySelector('.count-badge')).toHaveTextContent('0');
+  });
+
+  it('gives each board card a clean accessible name, not priority, title and description run together', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => jsonResponse({
+      ...board,
+      cards: [{
+        id: 'card-1', title: 'Wire the approval queue', description: 'Replace the legacy table.',
+        status: 'in_progress', priority: 'urgent',
+      }],
+    })));
+    render(<CardBoardView projectId="project-1" onOpenCard={() => {}} />);
+    await screen.findByText('Replace the legacy table.');
+    // If the button's name were computed from its content (priority + title +
+    // description all folded together), this exact-match query would fail.
+    expect(screen.getByRole('button', { name: 'Wire the approval queue' })).toBeInTheDocument();
+  });
 });
