@@ -1,7 +1,8 @@
 import { useId, useState } from 'react';
 import { readUsage, type SessionUpdate } from '../../shared/acp.js';
+import { CORE_CAPABILITIES, type UnsupportedCapability } from '../../shared/wire.js';
 import type { RunSummary } from '../api/client.js';
-import { useRunStream, type RunUpdate } from '../realtime/useRunStream.js';
+import { useRunStream, type ConnectionState, type RunUpdate } from '../realtime/useRunStream.js';
 
 export interface RunPanelProps {
   cardId: string;
@@ -145,6 +146,61 @@ function findFinishedRun(updates: RunUpdate[]): RunSummary | null {
   return null;
 }
 
+/**
+ * `unsupported` (`useRunStream`'s `RunStreamState`) holds two different kinds
+ * of entry under one shape, told apart only by whether `capability` is one of
+ * the three dotted ids in `CORE_CAPABILITIES` — negotiated once, from the
+ * core's `hello` — or a request type (`'subscribe'`, `'answer_permission'`,
+ * `'cancel_run'`, ...) the core sent back on a **refused request that already
+ * happened** (`src/server/realtime.ts`'s `send(connection, { type: 'error',
+ * requestType, message })`). The first kind is a standing fact about this
+ * socket, already rendered next to the control it gates
+ * (`cancelUnsupported`/`permissionUnsupported` below). The second is a
+ * one-off refusal of something this panel just tried — most visibly,
+ * `answer()` clears `pending` optimistically before the server has actually
+ * confirmed the answer (`useRunStream.ts`), so a refused `answer_permission`
+ * (two windows on one run, the other one answered first) leaves nothing
+ * pending and nothing wrong-looking unless the refusal itself is shown
+ * somewhere. This is that somewhere — every request-type entry, not just the
+ * one this task started with.
+ */
+function requestRefusals(unsupported: UnsupportedCapability[]): UnsupportedCapability[] {
+  const capabilityIds: readonly string[] = CORE_CAPABILITIES;
+  return unsupported.filter((entry) => !capabilityIds.includes(entry.capability));
+}
+
+const REQUEST_REFUSAL_LABELS: Record<string, string> = {
+  subscribe: 'Connecting to this run was refused',
+  answer_permission: 'Answering was refused',
+  cancel_run: 'Cancelling was refused',
+};
+
+/** The core's own reason, named to the action it refused when that action is a known one — never invented, never dropped. */
+function describeRequestRefusal(entry: UnsupportedCapability): string {
+  const label = REQUEST_REFUSAL_LABELS[entry.capability];
+  return label ? `${label}: ${entry.reason}` : entry.reason;
+}
+
+/**
+ * Why a control gated on a capability this panel cannot directly observe
+ * (`answer()`/`cancel()` check `can(capability)` inside the hook, which does
+ * not expose the granted set) should read as unavailable anyway: the socket
+ * itself is not open. Narrower than the real gate — `connection === 'open'`
+ * can still precede the server's own `hello` naming what it actually granted
+ * — but unlike the capability-negotiation entries in `unsupported`, this
+ * needs no wire event to know, and it is never wrong in the direction that
+ * matters (it disables a control that could not have worked; a control this
+ * misses would fail via the hook's own no-op, not act unsafely).
+ */
+function connectionReason(connection: ConnectionState): string | null {
+  switch (connection) {
+    case 'connecting': return 'Still connecting.';
+    case 'error': return 'Connection error.';
+    case 'closed': return 'Disconnected.';
+    case 'open': return null;
+  }
+}
+
 async function postRun(
   cardId: string,
   input: { orgAgentId: string; message: string; costCeilingTokens: number | null },
@@ -178,6 +234,7 @@ export function RunPanel({ cardId, runId, run = null, assigneeOrgAgentId }: RunP
   const [startError, setStartError] = useState<string | null>(null);
   const messageFieldId = useId();
   const ceilingFieldId = useId();
+  const permissionHeadingId = useId();
 
   // A run started from this panel becomes what it watches, the same as if
   // the card had opened with it. `runId` is a prop and cannot be reassigned;
@@ -193,11 +250,22 @@ export function RunPanel({ cardId, runId, run = null, assigneeOrgAgentId }: RunP
   const latestRun = findFinishedRun(updates) ?? seedRun;
   const cancelUnsupported = unsupported.find((entry) => entry.capability === 'run.cancel');
   const permissionUnsupported = unsupported.find((entry) => entry.capability === 'run.permission');
+  const refusals = requestRefusals(unsupported);
   const runIsOver = updates.some((item) => item.type === 'finished')
     || (latestRun ? latestRun.status !== 'running' : false);
-  const cancelDisabled = Boolean(cancelUnsupported) || runIsOver || !watchedRunId;
+  // `connection !== 'open'` is a narrower proxy for "the socket actually
+  // granted this capability" than the real gate `answer()`/`cancel()` check
+  // internally (`can(capability)`, from the hook's own negotiated
+  // `capabilities` — not exposed on `RunStreamState`, so not available here).
+  // It still closes the two failure modes that matter for a control that
+  // must never look live while it silently does nothing: the connection
+  // never coming up, and it dropping after it did.
+  const cancelDisabled = Boolean(cancelUnsupported) || runIsOver || !watchedRunId || connection !== 'open';
   const cancelReason = cancelUnsupported?.reason
-    ?? (runIsOver ? 'This run has already finished.' : null);
+    ?? (runIsOver ? 'This run has already finished.' : null)
+    ?? connectionReason(connection);
+  const permissionAnswerDisabled = Boolean(permissionUnsupported) || connection !== 'open';
+  const permissionReason = permissionUnsupported?.reason ?? connectionReason(connection);
 
   const canStart = Boolean(assigneeOrgAgentId) && message.trim().length > 0 && !starting;
 
@@ -235,6 +303,14 @@ export function RunPanel({ cardId, runId, run = null, assigneeOrgAgentId }: RunP
         </p>
       )}
 
+      {refusals.length > 0 && (
+        <div className="run-refusals">
+          {refusals.map((entry, index) => (
+            <p className="form-error" key={index} role="alert">{describeRequestRefusal(entry)}</p>
+          ))}
+        </div>
+      )}
+
       {latestRun && (
         <div className="run-panel-status">
           {latestRun.status === 'running' && (
@@ -250,17 +326,17 @@ export function RunPanel({ cardId, runId, run = null, assigneeOrgAgentId }: RunP
       )}
 
       {pending && (
-        <div className="run-permission" role="alert">
+        <div aria-labelledby={permissionHeadingId} className="run-permission" role="group">
           <div className="run-permission-heading">
             <span aria-hidden="true" className="run-live-dot run-live-dot-permission" />
-            <span className="field-label">Needs your decision</span>
+            <h4 className="field-label" id={permissionHeadingId}>Needs your decision</h4>
           </div>
           <p className="detail-prose">{pending.title || 'The agent is asking for permission to continue.'}</p>
           <div className="run-permission-options">
             {pending.options.map((option) => (
               <button
                 className="ghost-button"
-                disabled={Boolean(permissionUnsupported)}
+                disabled={permissionAnswerDisabled}
                 key={option.optionId}
                 onClick={() => answer(option.optionId)}
                 type="button"
@@ -269,12 +345,12 @@ export function RunPanel({ cardId, runId, run = null, assigneeOrgAgentId }: RunP
               </button>
             ))}
           </div>
-          {permissionUnsupported && <p className="form-note">{permissionUnsupported.reason}</p>}
+          {permissionReason && <p className="run-note">{permissionReason}</p>}
         </div>
       )}
 
       {watchedRunId && (
-        <ul aria-label="Run transcript" className="transcript-list">
+        <ul aria-label="Run transcript" className="transcript-list" tabIndex={0}>
           {updates.map((item, index) => <TranscriptRow item={item} key={index} />)}
           {updates.length === 0 && <li className="detail-empty">No activity recorded yet.</li>}
         </ul>
@@ -285,7 +361,7 @@ export function RunPanel({ cardId, runId, run = null, assigneeOrgAgentId }: RunP
           <button className="ghost-button" disabled={cancelDisabled} onClick={cancel} type="button">
             Cancel run
           </button>
-          {cancelReason && <p className="form-note">{cancelReason}</p>}
+          {cancelReason && <p className="run-note">{cancelReason}</p>}
         </div>
       )}
 
@@ -313,7 +389,7 @@ export function RunPanel({ cardId, runId, run = null, assigneeOrgAgentId }: RunP
           {starting ? 'Starting…' : 'Start run'}
         </button>
         {!assigneeOrgAgentId && (
-          <p className="form-note">Assign an agent to this card before starting a run.</p>
+          <p className="run-note">Assign an agent to this card before starting a run.</p>
         )}
       </div>
     </div>
