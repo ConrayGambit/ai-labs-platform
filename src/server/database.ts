@@ -209,8 +209,11 @@ const BUILTIN_AGENTS = [
     // on v2.1.226, 2026-08-11: no acp subcommand, no --acp, no
     // --experimental-acp. The adapter carries its own agent runtime through
     // @anthropic-ai/claude-agent-sdk, so the claude CLI is not needed for it.
-    // Executed end to end 2026-08-11: initialize -> protocolVersion 1,
-    // session/new -> a real session id.
+    // Handshake executed 2026-08-11 against adapter 0.66.0: initialize ->
+    // protocolVersion 1 (matching ACP_PROTOCOL_VERSION), session/new -> a real
+    // session id, cold start ~20s. No session/prompt was sent, so this does
+    // NOT prove a completed turn — tests/server/acp-live.test.ts (Task 5,
+    // gated behind AI_LABS_ACP_LIVE=1) is where that proof will live.
     acpCommand: 'npm:@agentclientprotocol/claude-agent-acp',
     acpArgs: [],
     outputFormat: 'json',
