@@ -234,6 +234,15 @@ export function buildApp({
       message.startsWith('Organizational agent is not assigned to project:') ||
       message.startsWith('Agent has no runtime assigned:') ||
       message.startsWith('Agent runtime is disabled:') ||
+      // The three refusals `agentSpawnOptions` and `identityOf` add: an owner
+      // can act on all three (assign a runtime, or pick a different agent),
+      // so they are classified even though their pre-existing siblings below
+      // (`assertAgentMayHoldRole`'s disabled/venture messages, and
+      // `agentSpawnOptions`'s own "runtime not found") are not — reclassifying
+      // those is a separate change this one does not make.
+      message.includes('has no runtime assigned and cannot run a session') ||
+      message.startsWith('Runtime is disabled for agent ') ||
+      message.includes('has no runtime assigned and may not hold a role on a card') ||
       // governance: the submitted content itself is incomplete, not who sent
       // it or what state the record is in.
       message === 'A review must answer the gate checklist; an empty checklist is not a review' ||

@@ -54,6 +54,22 @@ describe('migration checksums ignore formatting', () => {
     // There is no unhashed escape hatch to slip a change through.
     expect(() => applyMigrations(connection!, [second])).toThrow(/checksum/i);
   });
+
+  it('checksums rebuildsReferencedTable too, so flipping it on an applied migration is caught', () => {
+    connection = new Database(':memory:');
+    const plain: Migration = { id: '9104-rebuild-flag', sql: 'CREATE TABLE flg (id TEXT)' };
+    const flagged: Migration = {
+      id: '9104-rebuild-flag',
+      sql: 'CREATE TABLE flg (id TEXT)',
+      rebuildsReferencedTable: true,
+    };
+    applyMigrations(connection, [plain]);
+    // Identical SQL; only the execution-mechanics flag changed. That flag
+    // decides whether foreign key enforcement is disabled around this
+    // migration, so it is part of the migration's identity too, not a second
+    // unhashed escape hatch alongside the one the test above already closes.
+    expect(() => applyMigrations(connection!, [flagged])).toThrow(/checksum/i);
+  });
 });
 
 /**

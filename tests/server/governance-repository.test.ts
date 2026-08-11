@@ -222,6 +222,36 @@ describe('roles on a card at a gate', () => {
     expect(database!.governance.listReviewers(card.id, 'G1')).toEqual([]);
   });
 
+  /**
+   * The reviewer path's refusal above always ran with a builder already
+   * assigned. With no builder at all yet, `canReview`'s second argument short
+   * circuits to `null` before `identityOf` would ever run on it — but its
+   * FIRST argument, `identityOf(input.orgAgentId)`, is still an unconditional
+   * function-call argument, evaluated before `canReview` runs regardless of
+   * what `canReview` does with it. A refactor to `if (!builder) return { allowed: true };`
+   * ahead of computing identity would remove this refusal silently, and
+   * without this test, nothing would catch it.
+   */
+  it('REFUSES an agent with no runtime assigned as the first reviewer on a gate, with no builder yet', () => {
+    const { card } = seed();
+    const unassigned = database!.createOrgAgent({
+      name: 'Unassigned Reviewer', jobTitle: 'S', department: 'D', jobFunction: 'F', responsibilities: 'R',
+      runtimeId: database!.createAgent({
+        name: 'rt-temp2', command: 'rt-temp2', argsTemplate: ['{prompt}'],
+        promptTransport: 'argument', outputFormat: 'text',
+        versionArgs: ['--version'], timeoutMs: 120_000,
+      }).id,
+      model: 'model-temp2',
+    });
+    database!.connection.prepare('UPDATE org_agents SET runtime_id = NULL WHERE id = ?').run(unassigned.id);
+
+    expect(database!.governance.getBuilder(card.id, 'G1')).toBeNull();
+    expect(() => database!.governance.assignRole({
+      cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: unassigned.id,
+    })).toThrow(/no runtime/i);
+    expect(database!.governance.listReviewers(card.id, 'G1')).toEqual([]);
+  });
+
   it('allows a different builder at a different gate on the same card', () => {
     const { card, builder, otherModel } = seed();
     database!.governance.assignRole({

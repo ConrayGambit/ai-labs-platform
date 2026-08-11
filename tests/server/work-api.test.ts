@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { agentSpawnOptions } from '../../src/server/acp/launch.js';
 import { buildApp } from '../../src/server/app.js';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
+import { createRunSupervisor } from '../../src/server/run-supervisor.js';
 import type { FastifyInstance } from 'fastify';
 
 describe('the card API', () => {
@@ -226,6 +228,73 @@ describe('the card API', () => {
     // Better a clear refusal than a route that looks like it started something.
     expect(response.statusCode).toBeGreaterThanOrEqual(400);
     expect(response.json()).toMatchObject({ error: expect.stringMatching(/not available/i) });
+  });
+
+  /**
+   * These two build their own `app`, wiring a real RunSupervisor through
+   * `agentSpawnOptions` — the same function `src/server/index.ts` wires in
+   * production — rather than calling `seed()`, which builds its own
+   * supervisor-less `app`. So this exercises the actual HTTP status these two
+   * refusals arrive with, not merely that `agentSpawnOptions` throws the
+   * right message (already covered at the unit level in acp-launch.test.ts).
+   */
+  function seedForRunStart() {
+    database = createDatabase(':memory:');
+    const portfolio = database.platform.createPortfolio({ name: 'AI Labs', ownerUserId: 'owner' });
+    const venture = database.platform.createVenture({
+      portfolioId: portfolio.id, name: 'Research Lab', kind: 'research', mission: 'Evaluate tools.',
+    });
+    const project = database.platform.createProject({
+      ventureId: venture.id,
+      name: 'Tool Survey',
+      objective: 'Compare free research services.',
+      successCriteria: ['A sourced comparison is approved'],
+    });
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    const runtime = database.createAgent({
+      name: 'Runtime', command: 'rt', argsTemplate: ['{prompt}'],
+      promptTransport: 'argument', outputFormat: 'text', versionArgs: ['--version'], timeoutMs: 60_000,
+    });
+    const supervisor = createRunSupervisor({
+      database,
+      spawnFor: (agent) => agentSpawnOptions(agent, database!, process.cwd()),
+    });
+    app = buildApp({ database, invoke: async () => 'unused', supervisor });
+    return { card, runtime };
+  }
+
+  it('answers 400, not 500, when the run-start route hits an agent with no runtime assigned', async () => {
+    const { card, runtime } = seedForRunStart();
+    const agent = database!.createOrgAgent({
+      name: 'Unassigned', jobTitle: 'S', department: 'D', jobFunction: 'F', responsibilities: 'R',
+      runtimeId: runtime.id,
+    });
+    database!.connection.prepare('UPDATE org_agents SET runtime_id = NULL WHERE id = ?').run(agent.id);
+
+    const response = await app!.inject({
+      method: 'POST', url: `/api/cards/${card.id}/runs`,
+      payload: { orgAgentId: agent.id, message: 'Begin.' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: expect.stringMatching(/no runtime/i) });
+  });
+
+  it('answers 400, not 500, when the run-start route hits a disabled runtime', async () => {
+    const { card, runtime } = seedForRunStart();
+    const agent = database!.createOrgAgent({
+      name: 'Grounded', jobTitle: 'S', department: 'D', jobFunction: 'F', responsibilities: 'R',
+      runtimeId: runtime.id,
+    });
+    database!.connection.prepare('UPDATE agents SET enabled = 0 WHERE id = ?').run(runtime.id);
+
+    const response = await app!.inject({
+      method: 'POST', url: `/api/cards/${card.id}/runs`,
+      payload: { orgAgentId: agent.id, message: 'Begin.' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: expect.stringMatching(/disabled/i) });
   });
 
   it('writes the owner notes as the connection user, never as a body field', async () => {

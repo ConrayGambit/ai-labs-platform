@@ -629,10 +629,15 @@ export function createGovernanceRepository(connection: Database.Database): Gover
           }
         }
         if (input.role === 'reviewer') {
-          const eligibility = canReview(
-            identityOf(input.orgAgentId),
-            builder ? identityOf(builder.orgAgentId) : null,
-          );
+          // Computed unconditionally, on its own line and before the
+          // null-builder branch is decided — not left as an inline call
+          // argument that happens to run either way. A runtime-less agent
+          // must be refused as the FIRST reviewer on a gate too, with no
+          // builder yet to compare it against; a future short circuit added
+          // ahead of this (`if (!builder) return { allowed: true }`) must
+          // still trip over this line first.
+          const incoming = identityOf(input.orgAgentId);
+          const eligibility = canReview(incoming, builder ? identityOf(builder.orgAgentId) : null);
           if (!eligibility.allowed) throw new Error(eligibility.reason);
         }
 

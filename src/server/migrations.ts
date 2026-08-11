@@ -5,8 +5,9 @@ export interface Migration {
   /** Ordered, stable identifier. Never renamed after it has been applied anywhere. */
   id: string;
   /**
-   * The statements this migration applies. This string IS the migration's
-   * identity: it is what gets checksummed.
+   * The statements this migration applies. This string is the bulk of the
+   * migration's identity — what gets checksummed — along with
+   * `rebuildsReferencedTable` below, when set.
    */
   sql: string;
   /**
@@ -51,10 +52,71 @@ export interface Migration {
  *
  * Whitespace is normalised so reformatting is not mistaken for a change of meaning.
  *
+ * `rebuildsReferencedTable` is folded in too, when set: it decides whether
+ * foreign key enforcement is disabled around the migration, which is as much
+ * a part of what the migration does as the SQL itself, so it is not a second
+ * unhashed escape hatch alongside the one hashing `sql` already closes.
+ * Folded in only when true, so a plain `{ id, sql }` migration — every one
+ * before this field existed — checksums identically to before; only a
+ * migration that actually sets the flag is affected.
+ *
  * Guarded by tests/server/migration-checksum.test.ts.
  */
 function checksum(migration: Migration): string {
-  return createHash('sha256').update(migration.sql.replace(/\s+/g, ' ').trim()).digest('hex');
+  const identity = migration.sql.replace(/\s+/g, ' ').trim() +
+    (migration.rebuildsReferencedTable ? '\n--rebuildsReferencedTable' : '');
+  return createHash('sha256').update(identity).digest('hex');
+}
+
+/** One row of `PRAGMA foreign_key_check`'s output: a single dangling reference. */
+interface ForeignKeyViolation {
+  table: string;
+  rowid: number | null;
+  parent: string;
+  fkid: number;
+}
+
+/**
+ * Groups violations by shape — the table, the parent it fails to reference,
+ * and which of that table's foreign keys failed — discarding `rowid`.
+ *
+ * `rowid` cannot be compared before/after a rebuild: the rebuilt table is a
+ * genuinely different SQLite table with its own rowid sequence, so even a
+ * violation that existed all along (same offending value, same semantic row)
+ * gets a new rowid once its table has been recreated. Comparing by shape and
+ * count sidesteps that entirely — an unrelated table nobody rebuilt keeps its
+ * rowids exactly, so its counts are untouched either way.
+ */
+function violationCounts(violations: readonly ForeignKeyViolation[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const violation of violations) {
+    const key = `${violation.table}|${violation.parent}|${violation.fkid}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * The violations present after a rebuild that were not already present
+ * before it, by shape and count — not merely by shape, so a rebuild that
+ * doubles an already-broken reference is still caught, and not the raw
+ * "after" list, so a pre-existing violation elsewhere in the database is
+ * never reported as this migration's doing.
+ */
+function newViolations(
+  before: readonly ForeignKeyViolation[],
+  after: readonly ForeignKeyViolation[],
+): ForeignKeyViolation[] {
+  const beforeCounts = violationCounts(before);
+  const seen = new Map<string, number>();
+  const result: ForeignKeyViolation[] = [];
+  for (const violation of after) {
+    const key = `${violation.table}|${violation.parent}|${violation.fkid}`;
+    const alreadyCounted = seen.get(key) ?? 0;
+    seen.set(key, alreadyCounted + 1);
+    if (alreadyCounted >= (beforeCounts.get(key) ?? 0)) result.push(violation);
+  }
+  return result;
 }
 
 /**
@@ -74,6 +136,16 @@ function applyTableRebuildMigration(
   record: Database.Statement,
 ): void {
   const wasEnabled = connection.pragma('foreign_keys', { simple: true }) === 1;
+  // Taken before anything below runs, and unaffected by the enforcement
+  // pragma toggle that follows — `foreign_key_check` is a manual integrity
+  // scan of the current data against the current schema, not a consequence of
+  // enforcement being on. This is the only way to tell "already broken" from
+  // "broken by this migration": a database can arrive with a dangling
+  // reference from any cause — a hand-edited record, a restore from a partial
+  // backup — and blaming this migration for damage it never touched would
+  // abort every future boot with no in-product way forward, migrations being
+  // forward-only.
+  const before = connection.pragma('foreign_key_check') as ForeignKeyViolation[];
   if (wasEnabled) connection.pragma('foreign_keys = OFF');
   try {
     connection.transaction(() => {
@@ -83,10 +155,17 @@ function applyTableRebuildMigration(
       // foreign key that names it. A rebuild that silently dropped or
       // mismatched a referencing row would otherwise commit clean and surface
       // as a dangling reference only much later, far from its cause.
-      const violations = connection.pragma('foreign_key_check') as unknown[];
-      if (violations.length > 0) {
+      //
+      // Deliberately whole-database, not `foreign_key_check(<table>)`: the
+      // scoped form only validates foreign keys *from* the named table, and
+      // would miss exactly the case this exists to catch — a row the rebuild
+      // silently dropped, now dangling from another table that still points
+      // at it.
+      const after = connection.pragma('foreign_key_check') as ForeignKeyViolation[];
+      const introduced = newViolations(before, after);
+      if (introduced.length > 0) {
         throw new Error(
-          `Migration ${migration.id} left dangling foreign keys: ${JSON.stringify(violations)}`,
+          `Migration ${migration.id} left dangling foreign keys: ${JSON.stringify(introduced)}`,
         );
       }
       record.run(migration.id, digest, new Date().toISOString());
