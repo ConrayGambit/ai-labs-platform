@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { findCoverageFailures, parseRegister } from '../helpers/doc-coverage.js';
+import { findCoverageFailures, listSourceFiles, parseRegister } from '../helpers/doc-coverage.js';
 
 // Deliberately mixed: `secret-safety` appears as a filename, "run supervisor"
 // only as a concept. One test needs each, or the spaced form passes both and
@@ -107,5 +108,28 @@ describe('findCoverageFailures', () => {
     const result = run(['src/shared/wire.ts'], '- `src/shared/wire.ts` — waived:   ');
     expect(result.emptyEntries.map((entry) => entry.file)).toEqual(['src/shared/wire.ts']);
     expect(result.undocumented).toEqual(['src/shared/wire.ts']);
+  });
+});
+
+describe('the real architecture document', () => {
+  it('accounts for every server and shared module', () => {
+    const files = [...listSourceFiles('src/server'), ...listSourceFiles('src/shared')];
+    const register = parseRegister(readFileSync('docs/architecture-coverage.md', 'utf8'));
+    const failures = findCoverageFailures({
+      files,
+      docText: readFileSync('docs/architecture.md', 'utf8'),
+      register,
+    });
+
+    // One assertion carrying every group, so a failure reports all of it at
+    // once. A check that reveals one problem per run teaches people to stop
+    // running it.
+    expect({ malformed: register.malformed, ...failures }).toEqual({
+      malformed: [],
+      undocumented: [],
+      brokenAliases: [],
+      staleEntries: [],
+      emptyEntries: [],
+    });
   });
 });
