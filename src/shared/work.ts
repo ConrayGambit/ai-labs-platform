@@ -154,6 +154,39 @@ export interface BoardColumn {
   gateId: GateId | null;
 }
 
+/**
+ * Which column a card renders in, given the ladder it belongs to.
+ *
+ * Mirrors `columnKeyFor` in `src/server/gate-policy.ts` exactly, including its
+ * fallback: a card in review without a recorded gate falls to the ladder's
+ * *first gate*, not to some other fixed column and not off the board. That
+ * should not arise — the API sets a gate whenever it sets `status: 'review'`
+ * — but a client that resolves the same card to a different column than the
+ * server did is precisely the drift this increment exists to remove, so this
+ * lives in `src/shared/` and both `CardBoardView` and `CardDetailView` import
+ * it rather than each keeping its own copy. (`gate-policy.ts` cannot import
+ * from here — server code predates this need and duplicates these four
+ * lines; unifying that one remaining copy is a server-file change outside
+ * this task.)
+ *
+ * One deliberate divergence from the server: `columnKeyFor` *throws* when the
+ * ladder has no gates at all to fall back to, which is correct for a request
+ * handler but would blank the whole board over one card in a render path.
+ * This returns the card's own `'review'` status instead — a value that can
+ * never equal a real `BoardColumnKey`, so a caller that checks the result
+ * against its actual column list will correctly treat it as unplaced rather
+ * than silently misrouting it to an invented column.
+ */
+export function columnKeyForCard(
+  card: Pick<Card, 'status' | 'gateId'>,
+  ladder: Pick<GateLadder, 'gates'>,
+): BoardColumnKey {
+  if (card.status !== 'review') return card.status;
+  if (card.gateId) return card.gateId;
+  const first = ladder.gates[0];
+  return (first ? first.id : card.status) as BoardColumnKey;
+}
+
 export interface AdvanceEvidence {
   reviewsFiled: number;
   ownerDecision: boolean;

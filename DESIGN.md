@@ -7,6 +7,7 @@ colors:
   dialog-slate: "#151617"
   mark-graphite: "#24252a"
   rule-graphite: "#2a2c31"
+  rule-graphite-hover: "#3a3d44"
   veil-01: "rgba(255, 255, 255, 0.015)"
   veil-02: "rgba(255, 255, 255, 0.02)"
   veil-03: "rgba(255, 255, 255, 0.025)"
@@ -257,8 +258,10 @@ Six hues, each bound to one meaning. They belong to state and never to chrome.
   floor of legibility — and the floor is a measured one: 4.89:1 on the canvas, 4.77:1 on the sidebar,
   4.56:1 on the lightest veil. Nothing in the system may sit dimmer than this against a surface it
   has to be read on.
-- **Rule Graphite** (`#2a2c31`) and **Mark Graphite** (`#24252a`): the two solid greys — the
-  reporting-line elbows in the staff tree, and the plate behind a runtime glyph.
+- **Rule Graphite** (`#2a2c31`, hover `#3a3d44`) and **Mark Graphite** (`#24252a`): the two solid
+  greys — the reporting-line elbows in the staff tree, and the plate behind a runtime glyph. Rule
+  Graphite's hover value is the scrollbar thumb's own hover state, the one place a solid grey needs
+  one.
 
 ### Tertiary — the encoded set
 

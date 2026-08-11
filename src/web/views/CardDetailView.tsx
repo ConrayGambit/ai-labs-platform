@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ModalDialog } from '../components/ModalDialog.js';
 import {
   getBoard,
@@ -9,11 +9,20 @@ import {
   type CardDetail,
 } from '../api/client.js';
 import { SPECIFICATION_SECTIONS, type CardSpecification } from '../../shared/governance.js';
-import type { BoardColumn, BoardColumnKey, Card } from '../../shared/work.js';
+import type { BoardColumn, BoardColumnKey } from '../../shared/work.js';
 
 export interface CardDetailViewProps {
   cardId: string;
   onClose: () => void;
+  /**
+   * Called after a move this dialog made actually lands on the server. The
+   * board this card came from has no way to know its own data is stale
+   * otherwise — it fetched once, on mount, and a move happening inside this
+   * dialog is invisible to it. This view does not refetch the board itself;
+   * it only reports that a move succeeded and lets the caller decide what,
+   * if anything, needs a fresh fetch.
+   */
+  onMoved?: () => void;
 }
 
 /** `acceptance_criteria` -> `Acceptance criteria`. Used for section keys, activity kinds, and artifact kinds alike — all snake_case identifiers naming what follows. */
@@ -27,18 +36,7 @@ function formatTimestamp(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
 
-/**
- * Which column a card currently sits in, so the move control can offer every
- * *other* column. The same status/gateId mapping as CardBoardView's
- * `columnKeyForCard` — kept local rather than imported across the two view
- * files, since it is three lines and the two files are independently tested.
- */
-function currentColumnKey(card: Pick<Card, 'status' | 'gateId'>): BoardColumnKey {
-  if (card.status !== 'review') return card.status;
-  return card.gateId ?? 'backlog';
-}
-
-export function CardDetailView({ cardId, onClose }: CardDetailViewProps) {
+export function CardDetailView({ cardId, onClose, onMoved }: CardDetailViewProps) {
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [detail, setDetail] = useState<CardDetail | null>(null);
@@ -56,6 +54,12 @@ export function CardDetailView({ cardId, onClose }: CardDetailViewProps) {
   const titleId = useId();
   const notesFieldId = useId();
   const moveFieldId = useId();
+
+  // The "Saved ✓" / "Moved ✓" labels reset themselves after a couple of
+  // seconds; tracked in refs so a save or move triggered right before the
+  // dialog closes doesn't fire a setState after this component has unmounted.
+  const notesResetTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const moveResetTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +86,13 @@ export function CardDetailView({ cardId, onClose }: CardDetailViewProps) {
     return () => { cancelled = true; };
   }, [cardId]);
 
+  useEffect(() => {
+    return () => {
+      if (notesResetTimeout.current) clearTimeout(notesResetTimeout.current);
+      if (moveResetTimeout.current) clearTimeout(moveResetTimeout.current);
+    };
+  }, []);
+
   async function saveNotes(): Promise<void> {
     setNotesState('saving');
     setNotesError(null);
@@ -89,7 +100,8 @@ export function CardDetailView({ cardId, onClose }: CardDetailViewProps) {
       const updated = await putNotes(cardId, notesDraft);
       setDetail((current) => (current ? { ...current, card: updated } : current));
       setNotesState('saved');
-      setTimeout(() => setNotesState('idle'), 2000);
+      if (notesResetTimeout.current) clearTimeout(notesResetTimeout.current);
+      notesResetTimeout.current = setTimeout(() => setNotesState('idle'), 2000);
     } catch (reason) {
       setNotesError(reason instanceof Error ? reason.message : 'Unable to save notes');
       setNotesState('error');
@@ -111,7 +123,11 @@ export function CardDetailView({ cardId, onClose }: CardDetailViewProps) {
       setDetail((current) => (current ? { ...current, card: updated } : current));
       setMoveTarget('');
       setMoveState('moved');
-      setTimeout(() => setMoveState('idle'), 2000);
+      if (moveResetTimeout.current) clearTimeout(moveResetTimeout.current);
+      moveResetTimeout.current = setTimeout(() => setMoveState('idle'), 2000);
+      // The board this card came from fetched once, on mount, and has no
+      // other way to learn its data is now stale.
+      onMoved?.();
     } catch (reason) {
       setMoveError(reason instanceof Error ? reason.message : 'Unable to move the card');
       setMoveState('error');
@@ -181,12 +197,15 @@ export function CardDetailView({ cardId, onClose }: CardDetailViewProps) {
                   onChange={(event) => setMoveTarget(event.target.value)}
                   value={moveTarget}
                 >
+                  {/* Every column the server sent, including the card's current one:
+                      this view does not decide which destinations make sense, the
+                      server does, on submit. Withholding an option here would be
+                      exactly the client-side gate judgement this surface exists
+                      to avoid. */}
                   <option value="">Choose a column…</option>
-                  {columns
-                    .filter((column) => column.key !== currentColumnKey(detail.card))
-                    .map((column) => (
-                      <option key={column.key} value={column.key}>{column.label}</option>
-                    ))}
+                  {columns.map((column) => (
+                    <option key={column.key} value={column.key}>{column.label}</option>
+                  ))}
                 </select>
               </div>
               {moveError && <p className="form-error" role="alert">{moveError}</p>}

@@ -13,7 +13,7 @@
   background: #08090a;
   accent-color: var(--accent);
   caret-color: var(--accent);
-  scrollbar-color: #2a2c31 transparent;
+  scrollbar-color: var(--rule-graphite) transparent;
   scrollbar-width: thin;
   --canvas: #08090a;
   --text: #f7f8f8;
@@ -24,6 +24,8 @@
   --accent-dark: #5e6ad2;
   --border: rgba(255, 255, 255, 0.08);
   --border-subtle: rgba(255, 255, 255, 0.05);
+  --rule-graphite: #2a2c31;
+  --rule-graphite-hover: #3a3d44;
 }
 
 * { box-sizing: border-box; }
@@ -35,8 +37,8 @@ button { color: inherit; }
 ::selection { background: rgba(113, 112, 255, .28); color: var(--text); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: #2a2c31; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: #3a3d44; background-clip: content-box; }
+::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: var(--rule-graphite); background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--rule-graphite-hover); background-clip: content-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* Every interactive element carries a visible focus ring. This is the one accent
@@ -53,7 +55,8 @@ button { color: inherit; }
 .org-quick-row small, .run-detail small, .skill-category-title, .skill-details summary,
 .skill-details p, .skill-link, .tuning-fieldset legend, .skill-option strong,
 .skill-option small, .options-editor label, .runtime-endpoint,
-.runtime-card > span:last-child, .runtime-card-head > span:last-child {
+.runtime-card > span:last-child, .runtime-card-head > span:last-child,
+.detail-heading, .field-label {
   font-family: var(--font-small);
 }
 
@@ -320,8 +323,18 @@ button { color: inherit; }
 .board-card-stack { display: grid; gap: 8px; }
 .board-card { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); text-align: left; cursor: pointer; }
 .board-card:hover { background: rgba(255,255,255,.04); }
-.board-card h3 { margin: 7px 0 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--secondary); }
-.board-card p { margin: 7px 0 0; font-size: 13px; line-height: 1.5; color: var(--secondary); }
+/* Spans, not h3/p: a <button>'s content model is phrasing content only, and
+   block elements inside one are both invalid and fold into its accessible
+   name. display:block keeps the stacked layout without the flow elements. */
+.board-card-title { display: block; margin: 8px 0 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--secondary); }
+.board-card-description { display: block; margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--secondary); }
+/* Structural additions only — the box itself reuses .error-banner verbatim
+   (same object as any other refused/invalid state, per DESIGN.md's own
+   "the banner and the inline field error are the same object at different
+   sizes"), applied alongside this class rather than duplicated here. */
+.board-unplaced { margin-bottom: 12px; }
+.board-unplaced ul { display: grid; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; }
+.board-unplaced button { border: 0; background: transparent; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font-size: 13px; }
 
 /* Card detail — the dialog opened from a board card. The shell (.dialog,
    .dialog-heading, .icon-button), the field styling (.form-error,
@@ -346,5 +359,6 @@ button { color: inherit; }
 .activity-list, .artifact-list { display: grid; gap: 8px; }
 .activity-row, .artifact-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
 .activity-detail, .artifact-label { color: var(--secondary); font-size: 13px; }
-.activity-meta { margin-left: auto; color: var(--quiet); font-size: 11px; }
-.artifact-location { margin-left: auto; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
+/* Mono, not Text: a timestamp and an actor id are machine facts, same as the
+   file path in .artifact-location below — "Mono Means Machine." */
+.activity-meta, .artifact-location { margin-left: auto; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
