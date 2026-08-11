@@ -113,6 +113,20 @@ describe('the governance API', () => {
   }
 
   /**
+   * A bare card, reachable through the app only by an outsider actor with no
+   * grant on its venture. Minimal fixture for routes whose access check is
+   * all that is being tested.
+   */
+  function seedCardInInaccessibleVenture() {
+    database = createDatabase(':memory:');
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    const outsider = database.identity.createUser({ displayName: 'Outsider', role: 'staff' });
+    app = buildApp({ database, invoke: async () => 'unused', currentUserId: outsider.id });
+    return { cardId: card.id };
+  }
+
+  /**
    * A card with a filed, unruled P2 finding, reachable through the app only
    * by an outsider actor with no grant on its venture — everything the
    * adjudicate/contest access tests need, including a real findingId that
@@ -149,6 +163,61 @@ describe('the governance API', () => {
     };
   }
 
+  /** Same shape as seedOpenEscalation, but reachable through the app only by an outsider. */
+  function seedEscalationInInaccessibleVenture() {
+    database = createDatabase(':memory:');
+    const service = createGovernanceService(database);
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    const builder = makeAgent('Builder', 'model-one');
+    const reviewer = makeAgent('Reviewer', 'model-two');
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: builder.id });
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: reviewer.id });
+    const filed = service.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
+      verdict: 'reject', checklist, whatToPreserve: '', questionsForBuilder: '',
+      findings: [{
+        priority: 'P0', area: 'access',
+        finding: 'The route does not check venture access.',
+        predictedFailure: 'A staff user reads another venture cards.',
+        evidence: 'src/server/example-module.ts:1', proposedFix: 'Call assertVentureAccess first.',
+      }],
+    });
+    const outsider = database.identity.createUser({ displayName: 'Outsider', role: 'staff' });
+    app = buildApp({ database, invoke: async () => 'unused', currentUserId: outsider.id });
+    return { escalationId: filed.escalations[0]!.id };
+  }
+
+  /** Same shape as seedSupersededOverride, but reachable through the app only by an outsider. */
+  function seedOverrideInInaccessibleVenture() {
+    database = createDatabase(':memory:');
+    const service = createGovernanceService(database);
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    const builder = makeAgent('Builder', 'model-one');
+    const reviewer = makeAgent('Reviewer', 'model-two');
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: builder.id });
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: reviewer.id });
+    const filed = service.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
+      verdict: 'approve_with_findings', checklist, whatToPreserve: '', questionsForBuilder: '',
+      findings: [{
+        priority: 'P2', area: 'run-supervisor',
+        finding: 'The cost ceiling is evaluated after the usage row is written.',
+        predictedFailure: 'A run at 99% of ceiling writes one more update.',
+        evidence: 'src/server/example-module.ts:112', proposedFix: 'Evaluate the ceiling before persisting.',
+      }],
+    });
+    service.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId: filed.review.findings[0]!.id,
+      outcome: 'overridden', reason: 'The write is idempotent.', residualRisk: 'One redundant row.',
+      ruledByOrgAgentId: builder.id,
+    });
+    const outsider = database.identity.createUser({ displayName: 'Outsider', role: 'staff' });
+    app = buildApp({ database, invoke: async () => 'unused', currentUserId: outsider.id });
+    return { cardId: card.id };
+  }
+
   it('returns the seal state, with its reason, for a half-filed gate', async () => {
     const { cardId } = seedHalfFiledGate();
     const response = await app!.inject({
@@ -163,15 +232,23 @@ describe('the governance API', () => {
   });
 
   it('gives an unknown card the same answer as an inaccessible one', async () => {
-    seedHalfFiledGate();
+    const { cardId } = seedCardInInaccessibleVenture();
+
     const unknown = await app!.inject({
       method: 'GET', url: '/api/cards/card-does-not-exist/gates/G1/review-state',
     });
-    // The app's error handler maps any message starting "Access denied:" to 403
-    // with the body { error }. Throwing `Access denied: card <id>` for a card
-    // that does not exist is what makes the two indistinguishable.
+    const inaccessible = await app!.inject({
+      method: 'GET', url: `/api/cards/${cardId}/gates/G1/review-state`,
+    });
+
+    // The app's error handler maps any message starting "Access denied:" to
+    // 403 with the body { error }. requireCard now wraps assertVentureAccess's
+    // own message too, so both branches throw the identical "Access denied:
+    // card <id>" shape — not just the same status code.
     expect(unknown.statusCode).toBe(403);
-    expect(unknown.json().error).toContain('Access denied');
+    expect(inaccessible.statusCode).toBe(403);
+    expect(unknown.json().error).toMatch(/^Access denied: card /);
+    expect(inaccessible.json().error).toMatch(/^Access denied: card /);
   });
 
   it('ignores an actor id supplied in the body and uses the resolved actor', async () => {
@@ -240,5 +317,164 @@ describe('the governance API', () => {
     expect(inaccessible.statusCode).toBe(403);
     expect(unknown.json().error).toMatch(/^Access denied: finding /);
     expect(inaccessible.json().error).toMatch(/^Access denied: finding /);
+  });
+
+  it('gives an unknown escalation id the same response as an inaccessible one', async () => {
+    const { escalationId } = seedEscalationInInaccessibleVenture();
+    const payload = { resolution: 'Fixed at source.' };
+
+    const inaccessible = await app!.inject({
+      method: 'POST', url: `/api/escalations/${escalationId}/resolve`, payload,
+    });
+    const unknown = await app!.inject({
+      method: 'POST', url: '/api/escalations/escalation-does-not-exist/resolve', payload,
+    });
+
+    expect(unknown.statusCode).toBe(403);
+    expect(inaccessible.statusCode).toBe(403);
+    expect(unknown.json().error).toMatch(/^Access denied: escalation /);
+    expect(inaccessible.json().error).toMatch(/^Access denied: escalation /);
+  });
+
+  it('REFUSES the daily adjudication report to a non-owner', async () => {
+    database = createDatabase(':memory:');
+    const outsider = database.identity.createUser({ displayName: 'Outsider', role: 'staff' });
+    app = buildApp({ database, invoke: async () => 'unused', currentUserId: outsider.id });
+
+    const response = await app!.inject({ method: 'GET', url: '/api/adjudication-reports/2026-08-11' });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toContain('Access denied');
+    // The refusal does not name the actor: there is nothing case-by-case in
+    // an owner-only gate for a message to leak.
+    expect(response.json().error).not.toContain(outsider.id);
+  });
+
+  it('hides open escalations from a venture the actor cannot reach when no cardId is given', async () => {
+    const { escalationId } = seedEscalationInInaccessibleVenture();
+
+    const response = await app!.inject({ method: 'GET', url: '/api/escalations' });
+
+    expect(response.statusCode).toBe(200);
+    const escalations = response.json().escalations as Array<{ id: string }>;
+    expect(escalations.find((entry) => entry.id === escalationId)).toBeUndefined();
+  });
+
+  it('hides override entries from a venture the actor cannot reach when no cardId is given', async () => {
+    const { cardId } = seedOverrideInInaccessibleVenture();
+
+    const response = await app!.inject({ method: 'GET', url: '/api/override-register' });
+
+    expect(response.statusCode).toBe(200);
+    const entries = response.json().entries as Array<{ cardId: string | null }>;
+    expect(entries.some((entry) => entry.cardId === cardId)).toBe(false);
+  });
+
+  it('answers 409 when adjudicating before every required review is filed', async () => {
+    database = createDatabase(':memory:');
+    const project = seedProject(2);
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    const builder = makeAgent('Builder', 'model-one');
+    const reviewerA = makeAgent('Reviewer A', 'model-two');
+    const reviewerB = makeAgent('Reviewer B', 'model-three');
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: builder.id });
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: reviewerA.id });
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: reviewerB.id });
+    const service = createGovernanceService(database);
+    const filed = service.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewerA.id,
+      verdict: 'approve_with_findings', checklist, whatToPreserve: '', questionsForBuilder: '',
+      findings: [{
+        priority: 'P2', area: 'run-supervisor', finding: 'The cost ceiling is evaluated late.',
+        predictedFailure: 'One extra update.', evidence: 'src/server/example-module.ts:1',
+        proposedFix: 'Check earlier.',
+      }],
+    });
+    // reviewerB never files — only one of the two required reviews is in.
+    app = buildApp({ database, invoke: async () => 'unused', currentUserId: 'owner' });
+
+    const response = await app!.inject({
+      method: 'POST', url: `/api/findings/${filed.review.findings[0]!.id}/adjudicate`,
+      payload: { gateId: 'G1', outcome: 'adopted', reason: 'Fair.', ruledByOrgAgentId: builder.id },
+    });
+
+    // An ordinary, correctable governance refusal — not a server fault.
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toMatch(/all reviews must be filed/i);
+  });
+
+  it('answers 403 when the filing org agent is not a reviewer on this card', async () => {
+    database = createDatabase(':memory:');
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    const stranger = makeAgent('Stranger', 'model-one'); // never assigned any role
+    app = buildApp({ database, invoke: async () => 'unused', currentUserId: 'owner' });
+
+    const response = await app!.inject({
+      method: 'POST', url: `/api/cards/${card.id}/gates/G1/reviews`,
+      payload: {
+        reviewerOrgAgentId: stranger.id, verdict: 'approve',
+        checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toMatch(/not a reviewer/i);
+  });
+
+  it('answers 400 when a filed review carries an empty checklist', async () => {
+    database = createDatabase(':memory:');
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    const reviewer = makeAgent('Reviewer', 'model-one');
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: reviewer.id });
+    app = buildApp({ database, invoke: async () => 'unused', currentUserId: 'owner' });
+
+    const response = await app!.inject({
+      method: 'POST', url: `/api/cards/${card.id}/gates/G1/reviews`,
+      payload: {
+        reviewerOrgAgentId: reviewer.id, verdict: 'approve',
+        checklist: [], whatToPreserve: '', questionsForBuilder: '', findings: [],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatch(/checklist/i);
+  });
+
+  it('REFUSES the assignments route to an actor with no access to the card venture', async () => {
+    const { cardId } = seedCardInInaccessibleVenture();
+    const response = await app!.inject({
+      method: 'GET', url: `/api/cards/${cardId}/gates/G1/assignments`,
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toContain('Access denied');
+  });
+
+  it('REFUSES the specification route to an actor with no access to the card venture', async () => {
+    const { cardId } = seedCardInInaccessibleVenture();
+    const response = await app!.inject({ method: 'GET', url: `/api/cards/${cardId}/specification` });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toContain('Access denied');
+  });
+
+  it('REFUSES the handover route to an actor with no access to the card venture', async () => {
+    const { cardId } = seedCardInInaccessibleVenture();
+    const response = await app!.inject({ method: 'GET', url: `/api/cards/${cardId}/handover` });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toContain('Access denied');
+  });
+
+  it('REFUSES filing a review to an actor with no access to the card venture', async () => {
+    const { cardId } = seedCardInInaccessibleVenture();
+    const response = await app!.inject({
+      method: 'POST', url: `/api/cards/${cardId}/gates/G1/reviews`,
+      payload: {
+        reviewerOrgAgentId: 'whoever', verdict: 'approve',
+        checklist, whatToPreserve: '', questionsForBuilder: '', findings: [],
+      },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toContain('Access denied');
   });
 });

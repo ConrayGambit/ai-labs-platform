@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { OrchestratorDatabase } from './database.js';
 import { createGovernanceService } from './governance-service.js';
+import { hasVentureAccess } from '../shared/identity.js';
 import type { GateId } from '../shared/work.js';
 
 const gateIdSchema = z.enum(['G1', 'G2', 'G3', 'G4']);
@@ -75,7 +76,19 @@ export function registerGovernanceApi(
     if (!card) throw new Error(`Access denied: card ${cardId}`);
     const project = database.platform.getProject(card.projectId);
     if (!project) throw new Error(`Access denied: card ${cardId}`);
-    database.identity.assertVentureAccess(currentUserId, project.ventureId);
+    /*
+     * assertVentureAccess's own message names the actor and the venture —
+     * `Access denied: u-7 may not reach venture v-3` — and left unwrapped it
+     * reads differently from the unknown-card branch above. Same 403 either
+     * way, but different bodies, and a caller comparing them can tell "no
+     * such card" from "that card exists, and here is its venture id", which
+     * is exactly the oracle deny-by-default exists to close.
+     */
+    try {
+      database.identity.assertVentureAccess(currentUserId, project.ventureId);
+    } catch {
+      throw new Error(`Access denied: card ${cardId}`);
+    }
     return card;
   };
 
@@ -96,6 +109,63 @@ export function registerGovernanceApi(
       throw new Error(`Access denied: finding ${findingId}`);
     }
     return cardId;
+  };
+
+  /** The same shape as requireFindingCard, for a route keyed by an escalation id. */
+  const requireEscalationCard = (escalationId: string): string => {
+    const cardId = governanceService.getEscalationCardId(escalationId);
+    if (!cardId) throw new Error(`Access denied: escalation ${escalationId}`);
+    try {
+      requireCard(cardId);
+    } catch {
+      throw new Error(`Access denied: escalation ${escalationId}`);
+    }
+    return cardId;
+  };
+
+  /**
+   * The daily adjudication report is an owner-facing document, not a
+   * per-venture one — it aggregates P0s, overrides and cost across every
+   * venture by design (spec 20.4.5's "goes to the owner", generalized to the
+   * whole ledger). Gated on role alone, the same check resolveEscalation
+   * already relies on. Unlike a venture check, there is nothing case-by-case
+   * to distinguish here — "you are not the owner" is the same answer for
+   * every non-owner — so the message does not name the actor.
+   */
+  const requireOwner = (): void => {
+    if (database.identity.getUser(currentUserId)?.role !== 'owner') {
+      throw new Error('Access denied: this report is available to the owner only');
+    }
+  };
+
+  /** The venture a card belongs to, or null if the card or its project is gone. */
+  const ventureIdForCard = (cardId: string): string | null => {
+    const card = database.work.getCard(cardId);
+    if (!card) return null;
+    return database.platform.getProject(card.projectId)?.ventureId ?? null;
+  };
+
+  /**
+   * Scopes a list of card-linked records to what this actor may reach.
+   * listAccessibleVentureIds alone is not enough: it holds only explicit
+   * grants, and the owner reaches every venture without one
+   * (hasVentureAccess's own rule) — filtering by grants alone would show the
+   * owner nothing. Reusing hasVentureAccess rather than re-deriving its
+   * owner/enabled branches here is the same reason getFindingCardId exists:
+   * one place decides the rule, everywhere else reads the answer. An entry
+   * with no resolvable card (a null cardId, or one pointing at nothing) is
+   * denied by default rather than shown to a non-owner with no venture to
+   * check it against.
+   */
+  const scopeToAccessibleVentures = <T extends { cardId: string | null }>(entries: T[]): T[] => {
+    const user = database.identity.getUser(currentUserId);
+    if (!user) return [];
+    const granted = database.identity.listAccessibleVentureIds(currentUserId);
+    return entries.filter((entry) => {
+      if (!entry.cardId) return false;
+      const ventureId = ventureIdForCard(entry.cardId);
+      return ventureId !== null && hasVentureAccess(user, ventureId, granted);
+    });
   };
 
   app.get<{ Params: { cardId: string; gateId: string } }>(
@@ -136,19 +206,27 @@ export function registerGovernanceApi(
 
   app.get<{ Querystring: { cardId?: string } }>('/api/escalations', async (request) => {
     const { cardId } = request.query;
+    // Naming a card scopes to it and is checked the ordinary way. Omitting
+    // one asks for everything, so it is scoped to every venture this actor
+    // can reach instead — the platform-wide list is for the owner alone.
     if (cardId) requireCard(cardId);
-    return { escalations: governanceService.listOpenEscalations(cardId) };
+    const escalations = governanceService.listOpenEscalations(cardId);
+    return { escalations: cardId ? escalations : scopeToAccessibleVentures(escalations) };
   });
 
   app.get<{ Querystring: { cardId?: string } }>('/api/override-register', async (request) => {
     const { cardId } = request.query;
     if (cardId) requireCard(cardId);
-    return { entries: database.governance.listOverrides({ cardId }) };
+    const entries = database.governance.listOverrides({ cardId });
+    return { entries: cardId ? entries : scopeToAccessibleVentures(entries) };
   });
 
   app.get<{ Params: { date: string } }>(
     '/api/adjudication-reports/:date',
-    async (request) => database.governance.getAdjudicationReport(request.params.date),
+    async (request) => {
+      requireOwner();
+      return database.governance.getAdjudicationReport(request.params.date);
+    },
   );
 
   app.post<{ Params: { cardId: string; gateId: string } }>(
@@ -209,6 +287,7 @@ export function registerGovernanceApi(
   app.post<{ Params: { escalationId: string } }>(
     '/api/escalations/:escalationId/resolve',
     async (request) => {
+      requireEscalationCard(request.params.escalationId);
       const input = resolveSchema.parse(request.body);
       /*
        * resolvedByUserId comes from the resolved actor, never from the body.
