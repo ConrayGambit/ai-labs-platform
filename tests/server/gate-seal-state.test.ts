@@ -109,4 +109,34 @@ describe('the gate seal state', () => {
     // disagree, one of them is a second copy of the rule.
     expect(state.sealed).toBe(!visibleToB);
   });
+
+  it('unseals once every outstanding reviewer is out of time', () => {
+    const { cardId, reviewerA, reviewerB } = seedGate();
+    const expired = '2000-01-01T00:00:00.000Z';
+    database!.governance.setReviewDeadline({
+      cardId, gateId: 'G1', orgAgentId: reviewerA, deadlineAt: expired,
+    });
+    database!.governance.setReviewDeadline({
+      cardId, gateId: 'G1', orgAgentId: reviewerB, deadlineAt: expired,
+    });
+
+    const state = database!.governance.getGateSealState(cardId, 'G1');
+    expect(state.sealed).toBe(false);
+    expect(state.sealReason).toBeNull();
+  });
+
+  it('stays sealed when only one of two outstanding reviewers is out of time', () => {
+    // The rule is EVERY outstanding reviewer out of time, not merely one
+    // (tests/server/blind-review.test.ts:235 covers this shape for
+    // listVisibleReviews). A future change from "every" to "any" would flip
+    // this expectation, and nothing else in this file would catch it.
+    const { cardId, reviewerA } = seedGate();
+    database!.governance.setReviewDeadline({
+      cardId, gateId: 'G1', orgAgentId: reviewerA, deadlineAt: '2000-01-01T00:00:00.000Z',
+    });
+    // reviewerB is left with no deadline at all.
+
+    const state = database!.governance.getGateSealState(cardId, 'G1');
+    expect(state.sealed).toBe(true);
+  });
 });
