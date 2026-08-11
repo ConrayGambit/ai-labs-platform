@@ -823,4 +823,41 @@ export const MIGRATIONS: Migration[] = [
         );
       `,
   },
+  {
+    id: '0021-conversation',
+    // What bounds an agent-to-agent exchange.
+    //
+    // thread_turns records who spoke and when, because three of the four
+    // stopping limits are questions about the sequence of turns and cannot be
+    // answered from the messages alone: a message says what was said, a turn
+    // says that an agent chose to act.
+    //
+    // thread_state carries the terminal action, and `failure` carries the case
+    // the spec insists on reporting rather than swallowing — an exchange that
+    // ended in none of the three permitted actions.
+    sql: `
+        CREATE TABLE IF NOT EXISTS thread_turns (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES room_messages(id) ON DELETE CASCADE,
+          card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          org_agent_id TEXT NOT NULL REFERENCES org_agents(id),
+          sequence INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE (thread_id, sequence)
+        );
+        CREATE INDEX IF NOT EXISTS thread_turns_thread ON thread_turns(thread_id, sequence);
+
+        CREATE TABLE IF NOT EXISTS thread_state (
+          thread_id TEXT PRIMARY KEY REFERENCES room_messages(id) ON DELETE CASCADE,
+          card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          closed_at TEXT,
+          terminated_limit TEXT,
+          terminated_reason TEXT,
+          terminal_action_json TEXT,
+          failure TEXT
+        );
+
+        ALTER TABLE cards ADD COLUMN cost_ceiling_tokens INTEGER;
+      `,
+  },
 ];

@@ -32,6 +32,7 @@ interface CardRow {
   reviewer_count_override: number | null;
   reviewer_raise_reason: string | null;
   reviewer_raised_by_user_id: string | null;
+  cost_ceiling_tokens: number | null;
   position: number;
   created_at: string;
   updated_at: string;
@@ -71,6 +72,7 @@ const mapCard = (row: CardRow): Card => ({
   reviewerCountOverride: row.reviewer_count_override,
   reviewerRaiseReason: row.reviewer_raise_reason,
   reviewerRaisedByUserId: row.reviewer_raised_by_user_id,
+  costCeilingTokens: row.cost_ceiling_tokens,
   position: row.position,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -145,6 +147,8 @@ export interface WorkRepository {
    * below the ladder default, so there is no way in here to weaken a gate.
    */
   raiseReviewerCount(input: RaiseReviewerCountInput): Card;
+  /** Caps the tokens an entire card may spend. One of the four stopping limits. */
+  setCardCostCeiling(input: { cardId: string; costCeilingTokens: number | null }): Card;
   appendActivity(input: CardActivityInput): CardActivity;
   listActivity(cardId: string): CardActivity[];
   attachArtifact(input: AttachArtifactInput): CardArtifact;
@@ -426,6 +430,14 @@ export function createWorkRepository(connection: Database.Database): WorkReposit
         `).run({ ...input, updatedAt: new Date().toISOString() });
         return mapCard(requireCardRow(input.cardId));
       })();
+    },
+
+    setCardCostCeiling(input) {
+      requireCardRow(input.cardId);
+      connection
+        .prepare('UPDATE cards SET cost_ceiling_tokens = ?, updated_at = ? WHERE id = ?')
+        .run(input.costCeilingTokens, new Date().toISOString(), input.cardId);
+      return mapCard(requireCardRow(input.cardId));
     },
 
     appendActivity: (input) => recordActivity(input),
