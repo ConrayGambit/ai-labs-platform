@@ -89,7 +89,7 @@ describe('actual output, not claims', () => {
 });
 
 describe('the gate that requires it', () => {
-  const atG4 = { status: 'review' as const, gateId: 'G4' as const, reviewerCountOverride: null };
+  const atG4 = { status: 'review' as const, gateId: 'G4' as const };
   const evidence = (missingHandoverPoints: string[]) => ({
     reviewsFiled: 1,
     ownerDecision: true,
@@ -101,6 +101,7 @@ describe('the gate that requires it', () => {
 
   it('DENIES closing a card while the handover is incomplete, naming what is missing', () => {
     const verdict = canAdvance({
+      requiredReviewers: 1,
       card: atG4, ladder: PRODUCT_LADDER, to: 'done',
       evidence: evidence(['commands_and_actual_output', 'exact_next_work_item']),
     });
@@ -113,6 +114,7 @@ describe('the gate that requires it', () => {
 
   it('allows the close once the handover is complete', () => {
     expect(canAdvance({
+      requiredReviewers: 1,
       card: atG4, ladder: PRODUCT_LADDER, to: 'done', evidence: evidence([]),
     })).toEqual({ allowed: true });
   });
@@ -122,7 +124,8 @@ describe('the gate that requires it', () => {
   // closed, while moveCard refused the very same move.
   it('DENIES closing a BLOCKED card that has met none of the requirements', () => {
     const verdict = canAdvance({
-      card: { status: 'blocked', gateId: 'G2', reviewerCountOverride: null },
+      requiredReviewers: 1,
+      card: { status: 'blocked', gateId: 'G2' },
       ladder: PRODUCT_LADDER, to: 'done',
       evidence: {
         reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
@@ -136,7 +139,8 @@ describe('the gate that requires it', () => {
 
   it('still lets a blocked card go anywhere that is not done', () => {
     expect(canAdvance({
-      card: { status: 'blocked', gateId: 'G2', reviewerCountOverride: null },
+      requiredReviewers: 1,
+      card: { status: 'blocked', gateId: 'G2' },
       ladder: PRODUCT_LADDER, to: 'in_progress',
       evidence: {
         reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
@@ -149,7 +153,8 @@ describe('the gate that requires it', () => {
   it('does not demand a handover to move between gates', () => {
     // The handover is written to hand the work back, not to progress it.
     expect(canAdvance({
-      card: { status: 'review', gateId: 'G2', reviewerCountOverride: null },
+      requiredReviewers: 1,
+      card: { status: 'review', gateId: 'G2' },
       ladder: PRODUCT_LADDER, to: 'G3', evidence: evidence([...HANDOVER_POINTS]),
     })).toEqual({ allowed: true });
   });

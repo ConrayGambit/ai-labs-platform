@@ -88,10 +88,11 @@ describe('columns derived from a ladder', () => {
 
 describe('what a card may do next', () => {
   const atGate = (gateId: 'G1' | 'G2' | 'G3' | 'G4') =>
-    ({ status: 'review' as const, gateId, reviewerCountOverride: null });
+    ({ status: 'review' as const, gateId });
 
   it('DENIES leaving a gate with fewer reviews than required, and names the gate', () => {
     const verdict = canAdvance({
+      requiredReviewers: 1,
       card: atGate('G1'), ladder: PRODUCT_LADDER, to: 'G2', evidence: NO_EVIDENCE,
     });
     expect(denial(verdict).reason).toMatch(/G1/);
@@ -100,6 +101,7 @@ describe('what a card may do next', () => {
 
   it('allows leaving a gate once the required reviews are filed', () => {
     const verdict = canAdvance({
+      requiredReviewers: 1,
       card: atGate('G1'),
       ladder: PRODUCT_LADDER,
       to: 'G2',
@@ -108,9 +110,14 @@ describe('what a card may do next', () => {
     expect(verdict).toEqual({ allowed: true });
   });
 
-  it('counts a raised reviewer count, not the ladder default', () => {
+  it('counts the reviewers it is TOLD the gate wants, not the ladder default', () => {
+    // canAdvance no longer resolves the count. It used to, from a card override
+    // plus an optional project override the API never passed — so a project
+    // raised to two was honoured by the repository and ignored by the policy.
+    // There is one resolver now, and this consumes its answer.
     const verdict = canAdvance({
-      card: { ...atGate('G1'), reviewerCountOverride: 2 },
+      requiredReviewers: 2,
+      card: atGate('G1'),
       ladder: PRODUCT_LADDER,
       to: 'G2',
       evidence: { ...NO_EVIDENCE, reviewsFiled: 1, artifactCount: 1 },
@@ -118,8 +125,19 @@ describe('what a card may do next', () => {
     expect(denial(verdict).reason).toMatch(/1 of 2/);
   });
 
+  it('is satisfied once the reviews match what it was told', () => {
+    expect(canAdvance({
+      requiredReviewers: 2,
+      card: atGate('G1'),
+      ladder: PRODUCT_LADDER,
+      to: 'G2',
+      evidence: { ...NO_EVIDENCE, reviewsFiled: 2, artifactCount: 1 },
+    })).toEqual({ allowed: true });
+  });
+
   it('DENIES closing a card with nothing to inspect', () => {
     const verdict = canAdvance({
+      requiredReviewers: 1,
       card: atGate('G4'),
       ladder: PRODUCT_LADDER,
       to: 'done',
@@ -130,6 +148,7 @@ describe('what a card may do next', () => {
 
   it('DENIES passing a gate the owner must sign without the owner having signed', () => {
     const verdict = canAdvance({
+      requiredReviewers: 1,
       card: atGate('G3'),
       ladder: PRODUCT_LADDER,
       to: 'G4',
@@ -140,7 +159,8 @@ describe('what a card may do next', () => {
 
   it('lets a blocked card return to work at any time', () => {
     const verdict = canAdvance({
-      card: { status: 'blocked', gateId: 'G2', reviewerCountOverride: null },
+      requiredReviewers: 1,
+      card: { status: 'blocked', gateId: 'G2' },
       ladder: PRODUCT_LADDER,
       to: 'in_progress',
       evidence: NO_EVIDENCE,
@@ -152,13 +172,15 @@ describe('what a card may do next', () => {
 
   it('lets a card become blocked from anywhere, with no evidence at all', () => {
     expect(canAdvance({
+      requiredReviewers: 1,
       card: atGate('G3'), ladder: PRODUCT_LADDER, to: 'blocked', evidence: NO_EVIDENCE,
     })).toEqual({ allowed: true });
   });
 
   it('never returns a reason alongside an allowed verdict', () => {
     const allowed = canAdvance({
-      card: { status: 'backlog', gateId: null, reviewerCountOverride: null },
+      requiredReviewers: 1,
+      card: { status: 'backlog', gateId: null },
       ladder: PRODUCT_LADDER,
       to: 'ready',
       evidence: NO_EVIDENCE,
@@ -169,7 +191,8 @@ describe('what a card may do next', () => {
 
   it('DENIES a destination the ladder does not have', () => {
     const verdict = canAdvance({
-      card: { status: 'in_progress', gateId: null, reviewerCountOverride: null },
+      requiredReviewers: 1,
+      card: { status: 'in_progress', gateId: null },
       ladder: BUSINESS_LADDER,
       to: 'G2',
       evidence: NO_EVIDENCE,

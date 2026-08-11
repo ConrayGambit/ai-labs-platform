@@ -1,5 +1,4 @@
 import {
-  effectiveReviewerCount,
   type AdvanceEvidence,
   type BoardColumn,
   type BoardColumnKey,
@@ -100,11 +99,21 @@ export function columnKeyFor(card: CardPosition, ladder?: GateLadder): BoardColu
 }
 
 export interface AdvanceRequest {
-  card: CardPosition & { reviewerCountOverride?: number | null };
+  card: CardPosition;
   ladder: GateLadder;
   to: BoardColumnKey;
   evidence: AdvanceEvidence;
-  projectReviewerCountOverride?: number | null;
+  /**
+   * How many reviews this gate wants, already resolved.
+   *
+   * Required, and NOT computed here. This function used to resolve it a second
+   * time from a card override plus an optional project override — and the API
+   * never passed the project one, so the policy silently ignored a project
+   * raised to two reviewers while the repository honoured it. Two resolvers
+   * disagreeing about the same number. There is now one, in
+   * `GovernanceRepository.requiredReviewers`, and this consumes its answer.
+   */
+  requiredReviewers: number;
 }
 
 export type AdvanceVerdict = { allowed: true } | { allowed: false; reason: string };
@@ -158,15 +167,7 @@ export function canAdvance(request: AdvanceRequest): AdvanceVerdict {
 
   const currentGate = gateOf(ladder, card.gateId);
   if (card.status === 'review' && currentGate) {
-    let required: number;
-    try {
-      required = effectiveReviewerCount(currentGate, {
-        card: card.reviewerCountOverride,
-        project: request.projectReviewerCountOverride,
-      });
-    } catch (reason) {
-      return { allowed: false, reason: reason instanceof Error ? reason.message : String(reason) };
-    }
+    const required = request.requiredReviewers;
     if (evidence.reviewsFiled < required) {
       return {
         allowed: false,
