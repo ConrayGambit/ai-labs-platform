@@ -266,3 +266,27 @@ export function canReview(
   }
   return { allowed: true };
 }
+
+/**
+ * Whether a gate is currently sealed to its reviewers, and why.
+ *
+ * The owner reads every review (`reviewIsVisibleTo` returns true for the owner
+ * unconditionally), so without this a sealed gate would render to the owner as
+ * merely populated. This is a fact about the gate, not a restriction on the
+ * reader.
+ */
+export interface GateSealState {
+  cardId: string;
+  gateId: GateId;
+  requiredReviewers: number;
+  filedReviewerIds: string[];
+  /** The latest outstanding deadline, or null when any reviewer has none. */
+  deadlineAt: string | null;
+  sealed: boolean;
+  sealReason: string | null;
+}
+
+/** What `GET /api/cards/:cardId/gates/:gateId/review-state` returns. */
+export interface GateReviewState extends GateSealState {
+  visibleReviews: Review[];
+}
