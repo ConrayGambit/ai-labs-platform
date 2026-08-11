@@ -216,6 +216,23 @@ const BUILTIN_AGENTS = [
     env: {},
   },
   {
+    // Prime Intellect open-sourced Prime Agent on 6 August 2026 (MIT). It speaks
+    // ACP natively and its sessions are daemon-backed (survive disconnect,
+    // reattach with `prime-agent attach <agent>` / `--resume <path|id>`), but
+    // this task registers only the print-mode spawn invocation confirmed in
+    // the commit message. Choosing whether it connects over ACP instead
+    // (src/server/acp/) is a separate task with its own test surface.
+    id: 'prime',
+    name: 'Prime Agent',
+    kind: 'custom',
+    command: 'prime-agent',
+    args: ['-p', '{prompt}'],
+    outputFormat: 'text',
+    resultField: null,
+    coordinator: 0,
+    env: {},
+  },
+  {
     // DeepSeek has no official agent CLI; its API is Anthropic-compatible, so it
     // runs through the installed Claude Code CLI against the DeepSeek endpoint.
     id: 'deepseek',
@@ -253,6 +270,18 @@ const BUILTIN_AGENTS = [
 
 export const DEFAULT_ORGANIZATION_ID = 'default-org';
 
+/**
+ * No runtime in this registry publishes a launch flag for output speed, as of
+ * the dates recorded in the commit message for every runtime checked (claude,
+ * codex, kimi, hermes, prime; deepseek/minimax have no dedicated CLI). This is
+ * deliberate absence, not an oversight: `org_agents.speed` is a real column
+ * and `TuningOptionField` renders a `Speed` label for it, but no CLI flag
+ * exists to send it on yet. MiniMax comes closest — its `-highspeed` model
+ * variants are a genuine speed axis — and it is modeled as a model choice
+ * (see the `minimax` comment in BUILTIN_OPTION_VALUES below), not as a speed
+ * template, because the flag that varies is `--model`, not a separate speed
+ * flag. Add a `speed` key here only when a provider CLI actually accepts one.
+ */
 const BUILTIN_OPTION_TEMPLATES: Record<string, RuntimeOptionTemplates> = {
   claude: {
     model: ['--model', '{value}'],
@@ -263,9 +292,28 @@ const BUILTIN_OPTION_TEMPLATES: Record<string, RuntimeOptionTemplates> = {
     effort: ['-c', 'model_reasoning_effort={value}'],
   },
   kimi: {
-    // Kimi CLI exposes thinking as a boolean launch flag, not a valued option:
-    // any truthy effort selection appends `--thinking`.
+    // `-m`/`--model` overrides the configured default model for one run
+    // (kimi-command reference, "Model selection"). Thinking is a boolean
+    // launch flag, not a valued option: any truthy effort selection appends
+    // `--thinking`.
+    model: ['--model', '{value}'],
     effort: ['--thinking'],
+  },
+  hermes: {
+    // `hermes chat` accepts `-m`/`--model` to override the model for one run
+    // (full CLI reference at hermes-agent.nousresearch.com/docs/reference/
+    // cli-commands — the top-level README only documents the interactive
+    // `/model` and `hermes model` paths, which undersells this). No
+    // effort/thinking launch flag is documented anywhere in that reference;
+    // "reasoning effort" appears only as a config.yaml agent default (listed
+    // under what `hermes migrate` carries over), never as a `hermes chat`
+    // flag, so effort is deliberately left unpublished here rather than
+    // invented. `--provider <name>` is also real (a closed list of ~30
+    // backends) but has no matching RuntimeOptionKey to attach to, so it is
+    // left unmapped rather than folded into `model` — unlike Prime Agent,
+    // Hermes's `--model`/`--provider` split does not document a combined
+    // `provider/id` pattern for `--model` itself.
+    model: ['--model', '{value}'],
   },
   deepseek: {
     model: ['--model', '{value}'],
@@ -273,25 +321,56 @@ const BUILTIN_OPTION_TEMPLATES: Record<string, RuntimeOptionTemplates> = {
   minimax: {
     model: ['--model', '{value}'],
   },
+  prime: {
+    // `--model <pattern>` takes a free-form pattern (`provider/id`, optional
+    // `:thinking` suffix) with no published enum — `prime-agent model list`
+    // queries it live — so no curated optionValues.model is published either;
+    // see BUILTIN_OPTION_VALUES.prime. `--thinking <level>` is a closed,
+    // documented enum and is published below. `--provider <name>` exists but
+    // has no matching RuntimeOptionKey and is left unmapped, same reasoning
+    // as Hermes above.
+    model: ['--model', '{value}'],
+    effort: ['--thinking', '{value}'],
+  },
 };
 
 /**
- * Provider-accurate dropdown choices, verified against official provider docs
- * (August 2026). Only keys with a matching option template emit CLI flags.
+ * Provider-accurate dropdown choices, re-verified against each provider's own
+ * current documentation on 2026-08-11 (one line per runtime — flag, values,
+ * source URL, date checked — is in the commit message that introduced this
+ * comment). The prior "verified August 2026" comment here named no source and
+ * had drifted: codex's model and effort lists were both stale, and claude's
+ * effort list was missing a value the CLI's own --help documents. Only keys
+ * with a matching option template emit CLI flags; a runtime absent from this
+ * map, or missing a key present in BUILTIN_OPTION_TEMPLATES, gets the
+ * "middle case" free-text field rather than an invented enum (see
+ * TuningOptionField) — hermes, kimi and prime's `model` keys are examples:
+ * each has a confirmed --model/-m flag but no published fixed value list.
  */
 const BUILTIN_OPTION_VALUES: Record<string, RuntimeOptionChoices> = {
   claude: {
     model: ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-haiku-4-5'],
     // Note: claude-haiku-4-5 rejects --effort; leave effort unset for Haiku agents.
-    effort: ['low', 'medium', 'high', 'xhigh'],
+    effort: ['low', 'medium', 'high', 'xhigh', 'max'],
   },
   codex: {
-    model: ['gpt-5.1-codex-max', 'gpt-5.1-codex', 'gpt-5.1-codex-mini'],
-    // gpt-5.1-codex-mini accepts only low/medium/high.
-    effort: ['none', 'low', 'medium', 'high', 'xhigh'],
+    // gpt-5.1-codex-max/-codex/-codex-mini (the prior list) no longer appear
+    // anywhere in OpenAI's current model docs, not even as deprecated; these
+    // three are the current recommended, CLI-available generation.
+    model: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    // Confirmed exact enum from OpenAI's own config reference
+    // (model_reasoning_effort: "minimal | low | medium | high | xhigh").
+    // The prior list had "none", which is not a documented value; xhigh is
+    // noted there as model-dependent, so it may not apply to every model above.
+    effort: ['minimal', 'low', 'medium', 'high', 'xhigh'],
   },
   kimi: {
-    // Kimi switches models interactively via /model; thinking is a boolean flag.
+    // -m/--model is a real flag, but Kimi is multi-provider/multi-platform
+    // (Kimi Code, Moonshot CN/Global, or a configured OpenAI/Anthropic/Gemini/
+    // Vertex provider) with no fixed catalog — models are picked from a
+    // dynamic list via the /login wizard, so no curated list is published
+    // here (see BUILTIN_OPTION_TEMPLATES.kimi). Thinking is a boolean flag;
+    // this single sentinel value drives it on.
     effort: ['high'],
   },
   deepseek: {
@@ -310,6 +389,12 @@ const BUILTIN_OPTION_VALUES: Record<string, RuntimeOptionChoices> = {
       'MiniMax-M2.1-highspeed',
       'MiniMax-M2',
     ],
+  },
+  prime: {
+    // Confirmed exact enum from packages/coding-agent/docs/usage.md's Model
+    // Options table (--thinking <level>). No optionValues.model: --model
+    // takes a free-form pattern, not an enum (see BUILTIN_OPTION_TEMPLATES).
+    effort: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
   },
 };
 

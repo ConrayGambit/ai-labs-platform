@@ -17,6 +17,7 @@ describe('orchestrator database', () => {
       expect.objectContaining({ id: 'kimi', kind: 'kimi', command: 'kimi' }),
       expect.objectContaining({ id: 'claude', kind: 'claude', command: 'claude' }),
       expect.objectContaining({ id: 'codex', kind: 'codex', command: 'codex' }),
+      expect.objectContaining({ id: 'prime', kind: 'custom', command: 'prime-agent' }),
       expect.objectContaining({ id: 'deepseek', kind: 'custom', command: 'claude' }),
       expect.objectContaining({ id: 'minimax', kind: 'custom', command: 'claude' }),
     ]);
@@ -51,19 +52,41 @@ describe('orchestrator database', () => {
       'claude-fable-5',
       'claude-haiku-4-5',
     ]);
-    expect(claude?.optionValues.effort).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(claude?.optionValues.effort).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
 
     const codex = database.getAgent('codex');
     expect(codex?.optionTemplates.effort).toEqual(['-c', 'model_reasoning_effort={value}']);
-    expect(codex?.optionValues.model).toEqual([
-      'gpt-5.1-codex-max',
-      'gpt-5.1-codex',
-      'gpt-5.1-codex-mini',
-    ]);
+    expect(codex?.optionValues.model).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+    expect(codex?.optionValues.effort).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
 
     const kimi = database.getAgent('kimi');
+    expect(kimi?.optionTemplates.model).toEqual(['--model', '{value}']);
     expect(kimi?.optionTemplates.effort).toEqual(['--thinking']);
     expect(kimi?.optionValues.effort).toEqual(['high']);
+
+    // The coordinator runtime: previously published no option templates at
+    // all, which is the bug this task closes. It has a real --model flag and
+    // no fixed catalog, so no curated optionValues.model is published either.
+    const hermes = database.getAgent('hermes');
+    expect(hermes?.optionTemplates).toEqual({ model: ['--model', '{value}'] });
+    expect(hermes?.optionValues.model).toBeUndefined();
+
+    // Prime Agent: --thinking is a closed, documented enum; --model is a
+    // free-form pattern with no published list.
+    const prime = database.getAgent('prime');
+    expect(prime?.command).toBe('prime-agent');
+    expect(prime?.optionTemplates).toEqual({
+      model: ['--model', '{value}'],
+      effort: ['--thinking', '{value}'],
+    });
+    expect(prime?.optionValues).toEqual({
+      effort: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    });
+
+    // No runtime in this registry accepts a launch flag for speed.
+    for (const agent of database.listAgents()) {
+      expect(agent.optionTemplates.speed, `${agent.id} unexpectedly publishes a speed template`).toBeUndefined();
+    }
   });
 
   it('registers a custom CLI runtime through the shared adapter contract', () => {
