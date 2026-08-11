@@ -44,3 +44,4 @@ unmentioned; it cannot tell whether what the document says about them is true.
 - `src/server/platform-api.ts` — waived: HTTP surface for the platform tables; routes are named where they carry meaning.
 - `src/server/org-repository.ts` — waived: persistence for the organizational model described in the document.
 - `src/server/platform-default-portfolio.ts` — waived: first-run seed data, not architecture.
+- `src/server/conversation-guard.ts` — waived: enforces the stopping limits on agent-to-agent conversation; the document states that a run is bounded, not where each bound is applied.
