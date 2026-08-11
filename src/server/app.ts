@@ -91,6 +91,8 @@ const agentSchema = z.object({
   name: z.string().trim().min(1).max(120),
   command: z.string().trim().min(1).max(1_000),
   argsTemplate: z.array(z.string().max(20_000)).max(100),
+  acpCommand: z.string().trim().min(1).max(1_000).nullable().optional(),
+  acpArgs: z.array(z.string().max(20_000)).max(100).optional(),
   promptTransport: z.enum(['argument', 'stdin']).optional(),
   outputFormat: z.enum(['text', 'json', 'jsonl']).optional(),
   resultField: z.string().trim().max(200).nullable().optional(),

@@ -301,4 +301,30 @@ describe('orchestrator API', () => {
 
     await app.close();
   });
+
+  it('registers a custom runtime with its own ACP invocation', async () => {
+    database = createDatabase(':memory:');
+    const app = buildApp({
+      database,
+      invoke: async ({ runtime }) => `response from ${runtime.id}`,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/agents',
+      payload: {
+        name: 'Local ACP Bridge',
+        command: 'local-agent',
+        argsTemplate: ['{prompt}'],
+        acpCommand: 'npm:@example/local-acp',
+        acpArgs: ['--stdio'],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      acpCommand: 'npm:@example/local-acp',
+      acpArgs: ['--stdio'],
+    });
+  });
 });

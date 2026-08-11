@@ -30,6 +30,9 @@ Core service (Fastify) ------------------------------------- SQLite
                  v
         ACP client — JSON-RPC 2.0, newline-delimited, over the provider's stdio
                  |
+                 |  src/server/acp/launch.ts resolves the runtime's own ACP
+                 |  invocation to a shell-free spawn, and refuses to start a
+                 |  session when the runtime declares none
                  v
         Provider process launched from the runtime registry
         (shell: false, windowsHide, ${VAR} environment references)

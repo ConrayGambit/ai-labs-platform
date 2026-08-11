@@ -8,7 +8,7 @@ import type { AgentInvoker } from './council.js';
 import { createDatabase } from './database.js';
 import { createObsidianExporter } from './obsidian-exporter.js';
 import { createRunSupervisor } from './run-supervisor.js';
-import { resolveRuntimeEnv } from './agent-process.js';
+import { acpSpawnOptions } from './acp/launch.js';
 import { resolveAiLabsPaths } from './paths.js';
 import { startTenureSweep } from './tenure-sweep.js';
 
@@ -58,23 +58,25 @@ const currentUserId = process.env.AI_LABS_OWNER_USER_ID ?? 'owner';
 /**
  * How a run launches an agent's provider.
  *
- * The runtime's own command and arguments are used verbatim, and its `${VAR}`
- * environment references resolve at launch through the same helper every other
- * runtime launch uses. AI Labs never holds a model credential: the provider's
- * own CLI does, and the value is read from the environment at the moment of
- * spawn rather than stored anywhere here.
+ * A session uses the runtime's ACP invocation, not its single-shot one. They
+ * are different launches of the same provider and are not interchangeable:
+ * the single-shot form carries a `{prompt}` placeholder that only
+ * `runAgentProcess` substitutes, and a session sends its prompt in
+ * `session/prompt` with no prompt in argv at all. A runtime with no ACP
+ * invocation is refused here rather than launched — spawning its single-shot
+ * command would make a billed call on a literal `{prompt}` and then wait for
+ * JSON-RPC from a process that does not speak it.
+ *
+ * `${VAR}` environment references resolve at the moment of spawn, through the
+ * same helper every other runtime launch uses. AI Labs never holds a model
+ * credential: the provider's own process does.
  */
 const supervisor = createRunSupervisor({
   database,
   spawnFor: (agent) => {
     const runtime = database.getAgent(agent.runtimeId);
     if (!runtime) throw new Error(`Runtime not found for agent ${agent.id}: ${agent.runtimeId}`);
-    return {
-      command: runtime.command,
-      args: runtime.argsTemplate,
-      cwd: process.cwd(),
-      env: resolveRuntimeEnv(runtime.env ?? {}),
-    };
+    return acpSpawnOptions(runtime, process.cwd());
   },
 });
 
