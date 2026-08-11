@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
 
@@ -20,6 +23,7 @@ describe('orchestrator database', () => {
       expect.objectContaining({ id: 'prime', kind: 'custom', command: 'prime-agent' }),
       expect.objectContaining({ id: 'deepseek', kind: 'custom', command: 'claude' }),
       expect.objectContaining({ id: 'minimax', kind: 'custom', command: 'claude' }),
+      expect.objectContaining({ id: 'gemini', kind: 'custom', command: 'gemini' }),
     ]);
 
     // API providers bridge through the Claude Code CLI with endpoint env, and
@@ -208,5 +212,58 @@ describe('orchestrator database', () => {
 
     expect(runtime.acpCommand).toBeNull();
     expect(runtime.acpArgs).toEqual([]);
+  });
+
+  it('seeds an ACP invocation only for runtimes that have one', () => {
+    database = createDatabase(':memory:');
+
+    const CLAUDE_ADAPTER = 'npm:@agentclientprotocol/claude-agent-acp';
+    expect(database.getAgent('claude')?.acpCommand).toBe(CLAUDE_ADAPTER);
+    // The API-compatible providers reach their endpoint through the same
+    // adapter, carrying the ANTHROPIC_BASE_URL they already set.
+    expect(database.getAgent('deepseek')?.acpCommand).toBe(CLAUDE_ADAPTER);
+    expect(database.getAgent('minimax')?.acpCommand).toBe(CLAUDE_ADAPTER);
+    expect(database.getAgent('codex')?.acpCommand).toBe('npm:@agentclientprotocol/codex-acp');
+
+    // Gemini speaks ACP natively rather than through an adapter, so the flag
+    // rides in acpArgs.
+    expect(database.getAgent('gemini')?.acpCommand).toBe('npm:@google/gemini-cli');
+    expect(database.getAgent('gemini')?.acpArgs).toEqual(['--acp']);
+
+    // No published ACP mode was confirmed for these. NULL is refused loudly by
+    // acpSpawnOptions; a guessed flag would be the defect this work removes.
+    for (const id of ['kimi', 'hermes', 'prime']) {
+      expect(database.getAgent(id)?.acpCommand, `${id} should have no ACP invocation`).toBeNull();
+    }
+
+    // The single-shot invocation is untouched: the legacy hierarchy path still
+    // depends on the {prompt} placeholder these carry.
+    expect(database.getAgent('claude')?.argsTemplate).toEqual([
+      '-p', '{prompt}', '--output-format', 'json', '--max-turns', '10',
+    ]);
+  });
+
+  it('backfills an ACP invocation onto a runtime that predates the column', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ai-labs-acp-'));
+    const file = join(directory, 'orchestrator.db');
+    try {
+      const first = createDatabase(file);
+      // The pre-migration state: the row exists, its ACP invocation does not.
+      first.connection.prepare("UPDATE agents SET acp_command = NULL WHERE id = 'claude'").run();
+      // An owner's own choice, which the backfill must not overwrite.
+      first.connection
+        .prepare("UPDATE agents SET acp_command = 'my-own-adapter' WHERE id = 'codex'")
+        .run();
+      first.close();
+
+      const second = createDatabase(file);
+      expect(second.getAgent('claude')?.acpCommand).toBe(
+        'npm:@agentclientprotocol/claude-agent-acp',
+      );
+      expect(second.getAgent('codex')?.acpCommand).toBe('my-own-adapter');
+      second.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

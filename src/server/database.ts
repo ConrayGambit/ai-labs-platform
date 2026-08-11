@@ -179,6 +179,8 @@ const BUILTIN_AGENTS = [
     kind: 'hermes',
     command: 'hermes',
     args: ['chat', '-q', '{prompt}'],
+    acpCommand: null,
+    acpArgs: [],
     outputFormat: 'text',
     resultField: null,
     coordinator: 1,
@@ -190,6 +192,8 @@ const BUILTIN_AGENTS = [
     kind: 'kimi',
     command: 'kimi',
     args: ['-p', '{prompt}', '--output-format', 'text'],
+    acpCommand: null,
+    acpArgs: [],
     outputFormat: 'text',
     resultField: null,
     coordinator: 0,
@@ -201,6 +205,14 @@ const BUILTIN_AGENTS = [
     kind: 'claude',
     command: 'claude',
     args: ['-p', '{prompt}', '--output-format', 'json', '--max-turns', '10'],
+    // Claude Code's own CLI has no ACP mode — verified against `claude --help`
+    // on v2.1.226, 2026-08-11: no acp subcommand, no --acp, no
+    // --experimental-acp. The adapter carries its own agent runtime through
+    // @anthropic-ai/claude-agent-sdk, so the claude CLI is not needed for it.
+    // Executed end to end 2026-08-11: initialize -> protocolVersion 1,
+    // session/new -> a real session id.
+    acpCommand: 'npm:@agentclientprotocol/claude-agent-acp',
+    acpArgs: [],
     outputFormat: 'json',
     resultField: 'result',
     coordinator: 0,
@@ -212,6 +224,11 @@ const BUILTIN_AGENTS = [
     kind: 'codex',
     command: 'codex',
     args: ['exec', '{prompt}'],
+    // @agentclientprotocol/codex-acp bundles @openai/codex, so no separate
+    // install; auth is CODEX_API_KEY, OPENAI_API_KEY or ChatGPT login. From
+    // the project README, 2026-08-11 — documented, not executed here.
+    acpCommand: 'npm:@agentclientprotocol/codex-acp',
+    acpArgs: [],
     outputFormat: 'text',
     resultField: null,
     coordinator: 0,
@@ -229,6 +246,8 @@ const BUILTIN_AGENTS = [
     kind: 'custom',
     command: 'prime-agent',
     args: ['-p', '{prompt}'],
+    acpCommand: null,
+    acpArgs: [],
     outputFormat: 'text',
     resultField: null,
     coordinator: 0,
@@ -242,6 +261,11 @@ const BUILTIN_AGENTS = [
     kind: 'custom',
     command: 'claude',
     args: ['-p', '{prompt}', '--output-format', 'json', '--max-turns', '10'],
+    // Same adapter as claude, reached through the ANTHROPIC_BASE_URL this row
+    // already sets. Documented, not executed: the redirection assumes the
+    // bundled Agent SDK honours that variable the way the Claude CLI does.
+    acpCommand: 'npm:@agentclientprotocol/claude-agent-acp',
+    acpArgs: [],
     outputFormat: 'json',
     resultField: 'result',
     coordinator: 0,
@@ -259,6 +283,11 @@ const BUILTIN_AGENTS = [
     kind: 'custom',
     command: 'claude',
     args: ['-p', '{prompt}', '--output-format', 'json', '--max-turns', '10'],
+    // Same adapter as claude, reached through the ANTHROPIC_BASE_URL this row
+    // already sets. Documented, not executed: the redirection assumes the
+    // bundled Agent SDK honours that variable the way the Claude CLI does.
+    acpCommand: 'npm:@agentclientprotocol/claude-agent-acp',
+    acpArgs: [],
     outputFormat: 'json',
     resultField: 'result',
     coordinator: 0,
@@ -267,6 +296,26 @@ const BUILTIN_AGENTS = [
       ANTHROPIC_AUTH_TOKEN: '${MINIMAX_API_KEY}',
       ANTHROPIC_API_KEY: '${MINIMAX_API_KEY}',
     },
+  },
+  {
+    // Gemini CLI speaks ACP natively — `gemini --acp`, per docs/cli/acp-mode.md
+    // on google-gemini/gemini-cli@main, checked 2026-08-11. (--experimental-acp
+    // is the former name of the same flag.) The single-shot fields come from
+    // docs/cli/headless.md: -p enters headless mode, --output-format json
+    // returns one object whose top-level `response` is the final answer.
+    // Documented, not executed: the CLI is not installed on the machine this
+    // was written on, and no run has been made through it.
+    id: 'gemini',
+    name: 'Gemini CLI',
+    kind: 'custom',
+    command: 'gemini',
+    args: ['-p', '{prompt}', '--output-format', 'json'],
+    acpCommand: 'npm:@google/gemini-cli',
+    acpArgs: ['--acp'],
+    outputFormat: 'json',
+    resultField: 'response',
+    coordinator: 0,
+    env: {},
   },
 ] as const;
 
@@ -993,6 +1042,16 @@ export function createDatabase(filename: string): OrchestratorDatabase {
       if (changed) {
         connection.prepare('UPDATE agents SET env_json = ? WHERE id = ?').run(JSON.stringify(current), agent.id);
       }
+    }
+    for (const agent of BUILTIN_AGENTS) {
+      // Backfill for builtin runtimes seeded before the ACP columns existed.
+      // Guarded on NULL rather than on the row's other columns: NULL is the
+      // precise "never set" state, so an owner's own adapter is never
+      // overwritten. Same posture as the env and option backfills above.
+      if (!agent.acpCommand) continue;
+      connection
+        .prepare('UPDATE agents SET acp_command = ?, acp_args_json = ? WHERE id = ? AND acp_command IS NULL')
+        .run(agent.acpCommand, JSON.stringify(agent.acpArgs), agent.id);
     }
     for (const skill of BUILTIN_SKILLS) {
       seedSkill.run(
