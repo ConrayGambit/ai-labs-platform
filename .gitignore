@@ -22,3 +22,7 @@ docs/superpowers/
 # artefacts; this directory is the tool's own working state and would be swept
 # into a public repository by the first `git add -A` that ran near it.
 .impeccable/
+
+# Subagent-driven-development scratch: ledger, briefs, review packages.
+# The git history is the record; this is working state for one plan.
+.superpowers/
