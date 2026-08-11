@@ -43,8 +43,8 @@ const runtimes = [
     enabled: true,
     optionTemplates: { model: ['--model', '{value}'], effort: ['-c', 'model_reasoning_effort={value}'] },
     optionValues: {
-      model: ['gpt-5.1-codex-max', 'gpt-5.1-codex', 'gpt-5.1-codex-mini'],
-      effort: ['none', 'low', 'medium', 'high', 'xhigh'],
+      model: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+      effort: ['minimal', 'low', 'medium', 'high', 'xhigh'],
     },
     env: {},
   },
@@ -327,15 +327,15 @@ describe('orchestrator dashboard', () => {
     expect(modelSelect.tagName).toBe('SELECT');
     expect(Array.from(modelSelect.options).map((option) => option.value)).toEqual([
       '',
-      'gpt-5.1-codex-max',
-      'gpt-5.1-codex',
-      'gpt-5.1-codex-mini',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
     ]);
-    fireEvent.change(modelSelect, { target: { value: 'gpt-5.1-codex-mini' } });
+    fireEvent.change(modelSelect, { target: { value: 'gpt-5.6-luna' } });
     const effortSelect = screen.getByLabelText('Effort') as HTMLSelectElement;
     expect(Array.from(effortSelect.options).map((option) => option.value)).toEqual([
       '',
-      'none',
+      'minimal',
       'low',
       'medium',
       'high',
@@ -350,7 +350,7 @@ describe('orchestrator dashboard', () => {
       '/api/org-agents',
       expect.objectContaining({
         method: 'POST',
-        body: expect.stringContaining('"model":"gpt-5.1-codex-mini","speed":null,"effort":"high","skillIds":["skill-taste"]'),
+        body: expect.stringContaining('"model":"gpt-5.6-luna","speed":null,"effort":"high","skillIds":["skill-taste"]'),
       }),
     ));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(

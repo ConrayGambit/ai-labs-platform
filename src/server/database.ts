@@ -349,14 +349,21 @@ const BUILTIN_OPTION_TEMPLATES: Record<string, RuntimeOptionTemplates> = {
  */
 const BUILTIN_OPTION_VALUES: Record<string, RuntimeOptionChoices> = {
   claude: {
+    // claude-mythos-5 is also current but deliberately excluded: it is gated
+    // to the Project Glasswing invite program, not generally available.
     model: ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-haiku-4-5'],
     // Note: claude-haiku-4-5 rejects --effort; leave effort unset for Haiku agents.
     effort: ['low', 'medium', 'high', 'xhigh', 'max'],
   },
   codex: {
     // gpt-5.1-codex-max/-codex/-codex-mini (the prior list) no longer appear
-    // anywhere in OpenAI's current model docs, not even as deprecated; these
-    // three are the current recommended, CLI-available generation.
+    // anywhere in OpenAI's current model docs, not even as deprecated. The
+    // current "Recommended models" section actually lists FOUR CLI-available
+    // models, not three: these plus gpt-5.3-codex-spark, a ChatGPT-Pro-only,
+    // text-only research preview (no API access, no Codex cloud, not on the
+    // web surface). Deliberately excluded as not generally available, same
+    // reasoning as claude-mythos-5 above being left off the claude list —
+    // stated here rather than left for the next re-verification pass to miss.
     model: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
     // Confirmed exact enum from OpenAI's own config reference
     // (model_reasoning_effort: "minimal | low | medium | high | xhigh").
@@ -643,7 +650,13 @@ const BUILTIN_EXECUTIVES = [
     runtimeId: 'codex',
     authorityLevel: 80,
     canDelegate: true,
-    model: 'gpt-5.1-codex',
+    // gpt-5.6-terra: the balanced, everyday-work tier — the same relative
+    // position (not the flagship, not the cheapest) the retired gpt-5.1-codex
+    // held before this task's re-verification found it gone from the current
+    // model docs. Reaches fresh installs only: model is an owner's-choice
+    // field, never rewritten by reseed (spec 4.1.3) — correct behavior, not
+    // a shortfall, see the runtime-registry commit's follow-up note.
+    model: 'gpt-5.6-terra',
     speed: null,
     effort: 'medium',
     skillIds: ['skill-taste', 'skill-awesome-design'],
