@@ -56,7 +56,7 @@ button { color: inherit; }
 .skill-details p, .skill-link, .tuning-fieldset legend, .skill-option strong,
 .skill-option small, .options-editor label, .runtime-endpoint,
 .runtime-card > span:last-child, .runtime-card-head > span:last-child,
-.detail-heading, .field-label {
+.detail-heading, .field-label, .run-connection {
   font-family: var(--font-small);
 }
 
@@ -192,6 +192,12 @@ button { color: inherit; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 .ghost-button { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; background: rgba(255,255,255,.02); color: var(--muted); font-size: 12px; cursor: pointer; }
 .ghost-button:hover { color: var(--secondary); background: rgba(255,255,255,.04); }
+/* Pre-existing gap: a disabled .ghost-button (e.g. "Saving..." above) carried
+   no visual disabled state at all, same 45%/not-allowed language as every
+   other disabled control in this file (.task-action, .agent-form input). The
+   run panel's cancel control is the first disabled ghost-button that must
+   read as unavailable rather than merely inert, which is what surfaced it. */
+.ghost-button:disabled { cursor: not-allowed; opacity: .45; }
 .primary-button:disabled { cursor: wait; opacity: .6; }
 
 @media (max-width: 760px) {
@@ -231,7 +237,13 @@ button { color: inherit; }
 .run-row { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); }
 .run-status { flex: 0 0 auto; padding: 3px 8px; border-radius: 999px; font: 500 9px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; background: rgba(255,255,255,.05); color: var(--muted); }
 .run-completed { background: rgba(39,166,68,.14); color: #a9e4c2; }
-.run-failed { background: rgba(226,92,92,.14); color: #ffc4c4; }
+/* .run-stopped shares .run-failed's treatment: the run panel's own RunStatus
+   (src/server/run-repository.ts) adds 'stopped' for a run the platform itself
+   halted (a cost ceiling crossed) — a limit breached, same as Breach Red's
+   own definition, not a distinct outcome. 'cancelled' needs no override: a
+   person's own deliberate stop is neither success nor breach, so it falls
+   through to .run-status's neutral base above. */
+.run-failed, .run-stopped { background: rgba(226,92,92,.14); color: #ffc4c4; }
 .run-running, .run-queued { background: rgba(216,167,62,.14); color: #ecd9a8; }
 .run-detail { min-width: 0; display: grid; gap: 3px; }
 .run-detail strong { overflow: hidden; color: var(--secondary); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
@@ -350,8 +362,13 @@ button { color: inherit; }
 .detail-prose { margin: 0; color: var(--secondary); font-size: 13px; line-height: 1.5; }
 .detail-empty { margin: 0; color: var(--quiet); font-size: 13px; line-height: 1.5; }
 .detail-field { display: grid; gap: 8px; }
-.detail-field textarea, .detail-field select { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; outline: none; background: rgba(255,255,255,.025); color: var(--secondary); font-size: 12px; resize: vertical; }
-.detail-field textarea:focus, .detail-field select:focus { border-color: rgba(113,112,255,.7); box-shadow: 0 0 0 3px rgba(113,112,255,.09); }
+/* input added alongside textarea/select: the same Input component
+   (DESIGN.md's `components.input` token) this pair already implements, just
+   never previously needed by a plain text field here — the run panel's
+   token-ceiling field is the first. */
+.detail-field textarea, .detail-field select, .detail-field input { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; outline: none; background: rgba(255,255,255,.025); color: var(--secondary); font-size: 12px; resize: vertical; }
+.detail-field textarea:focus, .detail-field select:focus, .detail-field input:focus { border-color: rgba(113,112,255,.7); box-shadow: 0 0 0 3px rgba(113,112,255,.09); }
+.detail-field textarea:disabled, .detail-field input:disabled { opacity: .45; cursor: not-allowed; }
 .card-pill { display: inline-block; padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,.025); color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; white-space: nowrap; }
 .spec-list { display: grid; gap: 8px; }
 .spec-row { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
@@ -362,3 +379,35 @@ button { color: inherit; }
 /* Mono, not Text: a timestamp and an actor id are machine facts, same as the
    file path in .artifact-location below — "Mono Means Machine." */
 .activity-meta, .artifact-location { margin-left: auto; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
+
+/* Run panel — watching a live run and starting a new one, inside the card
+   detail dialog. Chrome stays neutral throughout (Veil/Rule Hairline, same
+   language as .spec-row/.activity-row above); the only colour is two small
+   Live dot markers, using the exact token DESIGN.md documents for a live
+   thing (box-shadow: 0 0 10px currentColor) rather than a tinted surface —
+   "a surface never colours itself... a panel earns importance with
+   position, rule weight and type, not with a tint." "Start a run" itself is
+   DESIGN.md's own named example of the Row action component (.task-action,
+   defined above under Card board), reused verbatim rather than styled anew. */
+.run-panel { display: grid; gap: 12px; }
+.run-connection { margin: 0; color: var(--quiet); font-size: 11px; }
+.run-panel-status { display: flex; align-items: center; gap: 8px; }
+.run-live-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+/* Pending Amber: "in progress, queued, running" (DESIGN.md, Secondary colours) — a live run, exactly. */
+.run-live-dot-running { background: #d8a73e; color: #d8a73e; }
+/* Signal Indigo: "marks... an item awaiting a human signature" (DESIGN.md, Primary colours) — a pending permission, exactly. The one accent use in this panel. */
+.run-live-dot-permission { background: #7170ff; color: #7170ff; }
+.run-cost-figure { margin-left: auto; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
+/* Full Rule Hairline (var(--border), 8%) rather than the faint 5% .spec-row
+   uses — the stronger weight is the sanctioned way to read as the more
+   consequential block on this panel, in place of a tint. */
+.run-permission { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); }
+.run-permission-heading { display: flex; align-items: center; gap: 8px; }
+.run-permission-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.transcript-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; max-height: 360px; overflow-y: auto; }
+.transcript-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.transcript-text { color: var(--secondary); font-size: 13px; line-height: 1.5; }
+/* Same divider language as .options-editor above: a Rule Hairline Faint
+   separates the "start a new run" region from whatever this panel is
+   already watching, on the panel's own grid gap rather than an added margin. */
+.run-start { border-top: 1px solid var(--border-subtle); padding-top: 12px; }
