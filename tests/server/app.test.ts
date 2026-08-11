@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/server/app.js';
 import { createDatabase, type OrchestratorDatabase } from '../../src/server/database.js';
+import { createRunSupervisor } from '../../src/server/run-supervisor.js';
 
 describe('orchestrator API', () => {
   let database: OrchestratorDatabase | undefined;
@@ -259,6 +260,44 @@ describe('orchestrator API', () => {
     }>();
     expect(body.run).toMatchObject({ mode: 'hierarchy', status: 'completed', rootOrgAgentId: chief.id });
     expect(body.messages.map(({ orgAgentId }) => orgAgentId)).toEqual([reviewer.id, chief.id]);
+
+    await app.close();
+  });
+
+  /**
+   * `npm start` registers @fastify/static on the built app *after* buildApp has
+   * returned, so buildApp must leave the boot queue alone. Resolving the
+   * instance while building it — awaiting it, or calling .then() on it — makes
+   * avvio hand back an already-settled promise for that later registration and
+   * then never finish booting: the process prints "unsettled top-level await"
+   * and exits 13 instead of listening. Only reachable with a supervisor, which
+   * is what puts the realtime plugin on the queue in the first place.
+   */
+  it('still boots when a plugin is registered after it is built', async () => {
+    database = createDatabase(':memory:');
+    const supervisor = createRunSupervisor({
+      database,
+      spawnFor: () => ({ command: process.execPath, args: [], cwd: process.cwd(), env: {} }),
+    });
+    const app = buildApp({ database, invoke: async () => 'unused', supervisor });
+
+    await app.register(async (instance) => {
+      instance.get('/late', async () => ({ late: true }));
+    });
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      app.ready().then(() => 'booted' as const),
+      new Promise<'never settled'>((resolve) => {
+        timer = setTimeout(() => resolve('never settled'), 2_000);
+      }),
+    ]);
+    clearTimeout(timer);
+    expect(outcome).toBe('booted');
+
+    // The late plugin is genuinely on the router, not merely awaited without effect.
+    const response = await app.inject({ method: 'GET', url: '/late' });
+    expect(response.statusCode).toBe(200);
 
     await app.close();
   });

@@ -404,7 +404,15 @@ export function buildApp({
 
   if (supervisor) {
     // Registered last so the plugin is in place before the route it serves.
-    void app.register(websocket).then(() => {
+    //
+    // `after` and not `.then()`: the Fastify instance is a thenable, so awaiting
+    // it — or attaching a `then` to it — starts the boot from inside the builder.
+    // A plugin the caller registers on the app we return (@fastify/static, under
+    // `npm start`) would then resolve against that already-running boot without
+    // actually loading, and the boot would never finish. `after` queues the same
+    // ordering without resolving anything.
+    app.register(websocket);
+    app.after(() => {
       registerRealtime(app, { database, supervisor, currentUserId });
     });
   }
