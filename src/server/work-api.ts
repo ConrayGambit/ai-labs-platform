@@ -61,8 +61,22 @@ export function registerWorkApi(
   /** Every route passes through here before it touches a card. */
   const assertProjectAccess = (projectId: string): void => {
     const project = database.platform.getProject(projectId);
+    // An unknown project and an inaccessible one give the same answer, so the
+    // API cannot be used to discover which projects exist.
     if (!project) throw new Error(`Access denied: project ${projectId}`);
-    database.identity.assertVentureAccess(currentUserId, project.ventureId);
+    /*
+     * assertVentureAccess's own message — `Access denied: u-7 may not reach
+     * venture v-3` — names the actor and the venture, and left unwrapped it
+     * reads differently from the unknown-project branch above. Same 403
+     * either way, but different bodies, and a caller comparing them can tell
+     * "no such project" from "that project exists, and here is its venture
+     * id", which is exactly the oracle deny-by-default exists to close.
+     */
+    try {
+      database.identity.assertVentureAccess(currentUserId, project.ventureId);
+    } catch {
+      throw new Error(`Access denied: project ${projectId}`);
+    }
   };
 
   const requireCard = (cardId: string) => {

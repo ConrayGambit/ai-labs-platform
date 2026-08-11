@@ -177,6 +177,39 @@ describe('the card API', () => {
     expect(inaccessible.json().error).toMatch(/^Access denied: card /);
   });
 
+  it('gives the same answer for a project that does not exist as for one you may not see', async () => {
+    const { project } = seed(
+      // A real user of this platform, with no grant on this project's venture.
+      (seeded) => seeded.identity.createUser({ displayName: 'Outsider', role: 'staff' }).id,
+    );
+
+    // assertProjectAccess always throws using the exact projectId it was
+    // called with, so probing the SAME id string is what makes the two
+    // bodies genuinely comparable byte for byte: a second, unrelated
+    // database that has never heard of this id stands in for "unknown",
+    // while the first database (seeded above, reachable only as an
+    // outsider) stands in for "real but inaccessible".
+    const otherDatabase = createDatabase(':memory:');
+    const otherApp = buildApp({ database: otherDatabase, invoke: async () => 'unused' });
+
+    const unknown = await otherApp.inject({ method: 'GET', url: `/api/projects/${project.id}/cards` });
+    const inaccessible = await app!.inject({ method: 'GET', url: `/api/projects/${project.id}/cards` });
+
+    await otherApp.close();
+    otherDatabase.close();
+
+    // The error handler maps any "Access denied:" message to 403 with
+    // { error }. assertProjectAccess must not let assertVentureAccess's own
+    // message — which names the actor and the venture — escape uncaught:
+    // both branches need byte-identical "Access denied: project <id>"
+    // bodies, not just the same status code, or a caller comparing the two
+    // responses learns which projects exist and which venture owns them.
+    expect(unknown.statusCode).toBe(403);
+    expect(inaccessible.statusCode).toBe(403);
+    expect(unknown.json().error).toMatch(/^Access denied: project /);
+    expect(unknown.body).toBe(inaccessible.body);
+  });
+
   it('REFUSES to start a run when no supervisor is configured', async () => {
     const { project } = seed();
     const created = await app!.inject({
