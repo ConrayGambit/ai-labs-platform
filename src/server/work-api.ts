@@ -139,6 +139,10 @@ export function registerWorkApi(
       card,
       ladder: ladderFor(card.projectId),
       to: to as BoardColumnKey,
+      // From the one resolver, so the policy and the record cannot disagree.
+      requiredReviewers: card.gateId
+        ? database.governance.requiredReviewers(card.id, card.gateId)
+        : 0,
       evidence: {
         reviewsFiled: 0,
         ownerDecision: false,

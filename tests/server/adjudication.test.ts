@@ -303,6 +303,7 @@ describe('adjudication', () => {
     expect(blocked.status).toBe('blocked');
 
     const verdict = canAdvance({
+      requiredReviewers: 1,
       card: blocked, ladder: PRODUCT_LADDER, to: 'in_progress',
       evidence: {
         reviewsFiled: 0, ownerDecision: false, artifactCount: 0,
@@ -379,6 +380,61 @@ describe('adjudication', () => {
     expect(() => service!.resolveEscalation({
       escalationId: filed.escalations[0]!.id, resolution: 'Again.', resolvedByUserId: 'owner',
     })).toThrow(/already resolved/i);
+  });
+
+  // Finding 9: a ruling could be revised indefinitely, because only a FINAL
+  // ruling blocked re-ruling and isFinal is set only after a contest. So
+  // adopted then overridden then deferred all succeeded, each appending a
+  // register entry, and "the builder rules" became "the builder keeps ruling".
+  it('REFUSES a second ruling when nobody contested the first', () => {
+    const { card, builder, reviewerA, reviewerB } = seed();
+    const filed = file(card.id, reviewerA.id, [finding()]);
+    file(card.id, reviewerB.id);
+    const findingId = filed.review.findings[0]!.id;
+    service!.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId, outcome: 'adopted',
+      reason: 'Fair.', ruledByOrgAgentId: builder.id,
+    });
+
+    expect(() => service!.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId, outcome: 'overridden',
+      reason: 'On reflection, no.', residualRisk: 'None.', ruledByOrgAgentId: builder.id,
+    })).toThrow(/already ruled|contest/i);
+    expect(service!.listRulings(findingId)).toHaveLength(1);
+  });
+
+  // Finding 12: the service trusted whoever it was handed as the resolver, and
+  // spec 20.1 gives P0 resolution to the owner alone.
+  it('REFUSES a P0 resolution from anyone but the owner', () => {
+    const { card, reviewerA } = seed();
+    const filed = file(card.id, reviewerA.id, [finding({
+      priority: 'P0', area: 'access', finding: 'No venture check.',
+      predictedFailure: 'Cross-venture read.', evidence: 'src/server/work-api.ts:88',
+    })]);
+    const staff = database!.identity.createUser({ displayName: 'Staff', role: 'staff' });
+
+    expect(() => service!.resolveEscalation({
+      escalationId: filed.escalations[0]!.id, resolution: 'Looks fine to me.',
+      resolvedByUserId: staff.id,
+    })).toThrow(/owner/i);
+    expect(service!.listOpenEscalations()).toHaveLength(1);
+    expect(database!.work.getCard(card.id)?.status).toBe('blocked');
+  });
+
+  // Finding 8: with two reviewers required and one assigned, the gate could
+  // never be satisfied and said so only by counting, never by naming the cause.
+  it('SAYS SO when a gate needs more reviewers than are assigned to it', () => {
+    const { card, builder, reviewerA, reviewerB } = seed();
+    // Remove one reviewer so the gate wants two and has one.
+    database!.connection
+      .prepare('DELETE FROM review_assignments WHERE card_id = ? AND org_agent_id = ?')
+      .run(card.id, reviewerB.id);
+    const filed = file(card.id, reviewerA.id, [finding()]);
+
+    expect(() => service!.adjudicate({
+      cardId: card.id, gateId: 'G1', findingId: filed.review.findings[0]!.id,
+      outcome: 'adopted', reason: 'Fair.', ruledByOrgAgentId: builder.id,
+    })).toThrow(/1 assigned|needs 2 reviewers/i);
   });
 
   it('lets a reviewer contest ONCE, and the re-ruling is final', () => {
