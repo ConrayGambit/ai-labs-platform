@@ -60,6 +60,7 @@ Invariant 3 binds the launch of the provider process, which is still `shell: fal
 - **agent_runs**, **agent_run_updates**, **run_permission_requests** — one ACP session per run: session id, parent run for session lineage, status and stop reason, token usage against a cost ceiling, every update in sequence, and every permission request with who answered it.
 - **review_assignments**, **reviews**, **review_findings** — who builds and who reviews at each gate, the reviews filed there, and the findings inside them.
 - **finding_rulings**, **finding_contests**, **p0_escalations**, **override_register** — the builder's rulings, a reviewer's single contest, P0 escalations to the owner, and the append-only override register.
+- **card_specifications**, **card_handovers**, **adjudication_reports** — the three written records a gate consults: one specification per card, one handover per card, and one report per calendar day.
 - **projects**, **tasks**, **runs**, **messages** — the pre-gate board, superseded by the platform project, the card and the agent run above, and still read by the retired coordinators described below.
 
 ## Governance: gates, reviews and findings
@@ -81,9 +82,23 @@ Findings are ranked **P0** to **P4**. The builder rules on each: *adopted*, *def
 
 **P0 is why the ladder has a top rung.** The builder may not override one. Filing a review that carries a P0 stops the card in the same transaction that records the review — the card moves to blocked, attributed to the platform because no person chose it — and raises an escalation for the owner. The card returns to work only when the last open escalation on it is resolved.
 
-A run that completes its turn moves its card to the ladder's first gate. A card closes on an inspectable artifact; without one it cannot reach done.
+A run that completes its turn moves its card to the ladder's first gate.
 
 `council.ts` (proposal → critique → synthesis, with a hardcoded coordinator) and `hierarchy.ts` (whole-subtree execution) are retired by this model and are no longer the coordination protocol. Both files remain in the tree behind `/api/tasks/:taskId/council` and `/api/tasks/:taskId/hierarchy`, working against the legacy task tables. One export is shared with the new path: `roleContext`, which renders an agent's stable identity and is used by the ACP prompt builder so the two renderings cannot drift.
+
+## Governance: the written records
+
+Three records are not documentation about the work — they are conditions on it, checked when a card moves.
+
+**The specification card** — thirteen sections, written before code: problem, outcome, acceptance criteria, scope, out of scope, constraints, interfaces, data and migrations, permissions and audit, failure modes, verification, rollout and rollback, open questions. G1 on the product ladder carries `requiresSpecification`, so a card cannot leave design until every section is written; whitespace counts as unwritten, because an empty heading is not an answer. Every missing section is named at once rather than one per attempt. If the card cannot be completed, the feature is not understood well enough to build.
+
+**The handover report** — nine points, including two the spec names literally: commands run with their *actual output*, and the exact next work item. A card cannot reach done without all nine. "Actual output" is checked rather than trusted: a fenced block or a shell prompt line counts, a sentence does not, and neither a leading digit nor a Markdown blockquote is accepted — "326 tests passed" is a claim however it is punctuated, and a rule that a quotation mark defeats is not a rule.
+
+**The daily adjudication report** — eight sections in fixed order, P0 escalations first, so the most urgent line is never the one nobody scrolls to. Every open P0 appears whatever day it was raised, since an unresolved one is still today's problem. A section with nothing to report gets an explicit sentence rather than an empty list, because *silence must be informative*: "no overrides were recorded" and a missing section are different facts and only one is reassuring. A day with no governance activity and no board movement produces no report at all — a report invented for a day nobody worked is noise that teaches people to skim. The report date must be a real calendar day; rows are matched by date prefix, so a month-shaped string would quietly gather thirty days and file them as one.
+
+So a card closes on all of: an inspectable artifact, a complete handover, its reviews filed and adjudicated, and the owner's signature where the gate demands it. Closing is an advance whatever the card was doing beforehand — a blocked card is not exempt.
+
+None of these have an HTTP surface yet. They are written through the repository layer, and `/api/cards/:cardId/move` reads them to decide whether a move is allowed.
 
 ## Organizational model
 
