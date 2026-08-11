@@ -66,6 +66,15 @@ export interface GovernanceService {
   resolveEscalation(input: {
     escalationId: string; resolution: string; resolvedByUserId: string;
   }): P0Escalation;
+  /**
+   * The id of the card an escalation belongs to, or null if the escalation
+   * does not exist. A query over data this service already owns (p0_escalations
+   * is not on GovernanceRepository at all), the same shape as
+   * GovernanceRepository.getFindingCardId — a route keyed by an escalation id
+   * resolves its card here, so an unknown escalation and one whose card is
+   * unreachable read the same.
+   */
+  getEscalationCardId(escalationId: string): string | null;
 }
 
 interface RulingRow {
@@ -404,6 +413,13 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
             .get(input.escalationId) as EscalationRow,
         );
       })();
+    },
+
+    getEscalationCardId(escalationId) {
+      const row = connection
+        .prepare('SELECT card_id AS cardId FROM p0_escalations WHERE id = ?')
+        .get(escalationId) as { cardId: string } | undefined;
+      return row?.cardId ?? null;
     },
   };
 }
