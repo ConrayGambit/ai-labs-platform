@@ -24,6 +24,8 @@ export interface Card {
   reviewerCountOverride: number | null;
   reviewerRaiseReason: string | null;
   reviewerRaisedByUserId: string | null;
+  /** A token ceiling for everything done on this card, or null for none. */
+  costCeilingTokens: number | null;
   position: number;
   createdAt: string;
   updatedAt: string;
