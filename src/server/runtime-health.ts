@@ -14,8 +14,11 @@ import { resolveRuntimeEnv } from './agent-process.js';
  * original 5s to absorb that contention; a health call being a few seconds
  * slower is a cheap trade against a false negative that tells an operator a
  * working runtime is unavailable.
+ *
+ * Exported so tests can drive fake timers by the real value instead of a
+ * duplicated literal - see tests/server/runtime-health.test.ts.
  */
-const PROBE_TIMEOUT_MS = 15_000;
+export const PROBE_TIMEOUT_MS = 15_000;
 const OUTPUT_LIMIT = 8_192;
 
 export async function probeAgentRuntime(runtime: AgentRuntime): Promise<RuntimeHealth> {
@@ -85,6 +88,15 @@ export async function probeAgentRuntime(runtime: AgentRuntime): Promise<RuntimeH
   });
 }
 
+/**
+ * Probes every registered runtime in parallel. Promise.all means this
+ * call's latency is bounded by its single slowest probe, not their sum -
+ * so /api/agents/health takes up to ~PROBE_TIMEOUT_MS (15s) to answer in
+ * the worst case (every runtime unresponsive), versus ~5s before that
+ * bound was raised. Nothing renders this endpoint's response today, so
+ * that worst case has no visible cost yet, but it is the number to know
+ * before building something that does.
+ */
 export async function probeAgentRuntimes(runtimes: AgentRuntime[]): Promise<RuntimeHealth[]> {
   return await Promise.all(runtimes.map((runtime) => probeAgentRuntime(runtime)));
 }
