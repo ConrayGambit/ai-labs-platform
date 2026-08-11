@@ -143,6 +143,7 @@ describe('the vertical slice', () => {
     // 9. The agent may not close its own work. No artifact, no review, no pass.
     const missing = database.governance.missingSpecificationSections(card.id);
     const denied = canAdvance({
+      requiredReviewers: 1,
       card: atGate,
       ladder: PRODUCT_LADDER,
       to: 'done',
@@ -158,6 +159,7 @@ describe('the vertical slice', () => {
     // 9b. Nor may it leave G1 on a specification nobody wrote.
     expect(missing).toHaveLength(13);
     const withReview = canAdvance({
+      requiredReviewers: 1,
       card: atGate, ladder: PRODUCT_LADDER, to: 'G2',
       evidence: {
         reviewsFiled: 1, ownerDecision: false, artifactCount: 1,
@@ -181,6 +183,7 @@ describe('the vertical slice', () => {
     });
     expect(database.work.listArtifacts(card.id)).toHaveLength(1);
     const allowed = canAdvance({
+      requiredReviewers: 1,
       card: atGate,
       ladder: PRODUCT_LADDER,
       to: 'G2',

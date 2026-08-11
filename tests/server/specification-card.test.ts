@@ -49,7 +49,7 @@ describe('the feature specification card', () => {
 });
 
 describe('the gate that requires it', () => {
-  const atG1 = { status: 'review' as const, gateId: 'G1' as const, reviewerCountOverride: null };
+  const atG1 = { status: 'review' as const, gateId: 'G1' as const };
   const evidence = (missing: string[]) => ({
     reviewsFiled: 1,
     ownerDecision: true,
@@ -61,6 +61,7 @@ describe('the gate that requires it', () => {
 
   it('DENIES leaving G1 while the specification is incomplete, naming what is missing', () => {
     const verdict = canAdvance({
+      requiredReviewers: 1,
       card: atG1, ladder: PRODUCT_LADDER, to: 'G2',
       evidence: evidence(['verification', 'failure_modes']),
     });
@@ -75,6 +76,7 @@ describe('the gate that requires it', () => {
 
   it('allows the G1 advance once the specification is complete', () => {
     expect(canAdvance({
+      requiredReviewers: 1,
       card: atG1, ladder: PRODUCT_LADDER, to: 'G2', evidence: evidence([]),
     })).toEqual({ allowed: true });
   });
@@ -83,6 +85,7 @@ describe('the gate that requires it', () => {
     // G1 there is a draft review, not a feature design. Demanding thirteen
     // engineering sections of a letter is how a gate gets worked around.
     expect(canAdvance({
+      requiredReviewers: 1,
       card: atG1, ladder: BUSINESS_LADDER, to: 'G4', evidence: evidence(['verification']),
     })).toEqual({ allowed: true });
   });
@@ -91,14 +94,16 @@ describe('the gate that requires it', () => {
     // The card is written at G1. Requiring it to get there would be a gate
     // nothing could ever enter.
     expect(canAdvance({
-      card: { status: 'in_progress', gateId: null, reviewerCountOverride: null },
+      requiredReviewers: 1,
+      card: { status: 'in_progress', gateId: null },
       ladder: PRODUCT_LADDER, to: 'G1', evidence: evidence([...SPECIFICATION_SECTIONS]),
     })).toEqual({ allowed: true });
   });
 
   it('still lets a blocked card return to work with no specification', () => {
     expect(canAdvance({
-      card: { status: 'blocked', gateId: 'G1', reviewerCountOverride: null },
+      requiredReviewers: 1,
+      card: { status: 'blocked', gateId: 'G1' },
       ladder: PRODUCT_LADDER, to: 'in_progress',
       evidence: evidence([...SPECIFICATION_SECTIONS]),
     })).toEqual({ allowed: true });
