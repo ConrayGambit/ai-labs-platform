@@ -119,19 +119,23 @@ const mapEscalation = (row: EscalationRow): P0Escalation => ({
 export function createGovernanceService(database: OrchestratorDatabase): GovernanceService {
   const connection = database.connection;
 
+  /**
+   * The finding, with the fields ruling and contesting need. Card resolution
+   * is not re-derived here — getFindingCardId is the one place that lookup
+   * lives, the same reason getGateSealState lives in one place rather than
+   * being recomputed by each caller.
+   */
   const findingRow = (findingId: string) => {
+    const cardId = database.governance.getFindingCardId(findingId);
+    if (cardId === null) throw new Error(`Finding not found: ${findingId}`);
     const row = connection
       .prepare(
-        `SELECT f.*, r.card_id, r.gate_id, r.reviewer_org_agent_id
+        `SELECT f.priority, r.reviewer_org_agent_id
            FROM review_findings f JOIN reviews r ON r.id = f.review_id
           WHERE f.id = ?`,
       )
-      .get(findingId) as {
-        id: string; priority: Finding['priority']; card_id: string;
-        gate_id: GateId; reviewer_org_agent_id: string;
-      } | undefined;
-    if (!row) throw new Error(`Finding not found: ${findingId}`);
-    return row;
+      .get(findingId) as { priority: Finding['priority']; reviewer_org_agent_id: string };
+    return { cardId, priority: row.priority, reviewerOrgAgentId: row.reviewer_org_agent_id };
   };
 
   const listRulings = (findingId: string): Ruling[] =>
@@ -273,8 +277,8 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
         // override with a date attached (spec 20.4 rule 4, spec 20.5).
         const registerEntry = !isOverride(input.outcome) ? null : database.governance.appendOverride({
           findingId: input.findingId,
-          cardId: finding.card_id,
-          reviewerOrgAgentId: finding.reviewer_org_agent_id,
+          cardId: finding.cardId,
+          reviewerOrgAgentId: finding.reviewerOrgAgentId,
           priority: finding.priority,
           reason: input.reason,
           residualRisk: input.residualRisk ?? '',
@@ -307,7 +311,7 @@ export function createGovernanceService(database: OrchestratorDatabase): Governa
        * finding has a final ruling" — turning the reviewer's one appeal into
        * the builder's lock.
        */
-      if (input.contestedByOrgAgentId !== finding.reviewer_org_agent_id) {
+      if (input.contestedByOrgAgentId !== finding.reviewerOrgAgentId) {
         throw new Error(
           'Only the reviewer who raised the finding may contest the ruling on it',
         );

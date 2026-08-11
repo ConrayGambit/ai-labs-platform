@@ -112,6 +112,43 @@ describe('the governance API', () => {
     return { cardId: card.id };
   }
 
+  /**
+   * A card with a filed, unruled P2 finding, reachable through the app only
+   * by an outsider actor with no grant on its venture — everything the
+   * adjudicate/contest access tests need, including a real findingId that
+   * the service could otherwise act on.
+   */
+  function seedFindingInInaccessibleVenture() {
+    database = createDatabase(':memory:');
+    const service = createGovernanceService(database);
+    const project = seedProject();
+    const card = database.work.createCard({ projectId: project.id, title: 'Survey the field' });
+    const builder = makeAgent('Builder', 'model-one');
+    const reviewer = makeAgent('Reviewer', 'model-two');
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'builder', orgAgentId: builder.id });
+    database.governance.assignRole({ cardId: card.id, gateId: 'G1', role: 'reviewer', orgAgentId: reviewer.id });
+    const filed = service.fileReview({
+      cardId: card.id, gateId: 'G1', reviewerOrgAgentId: reviewer.id,
+      verdict: 'approve_with_findings', checklist, whatToPreserve: '', questionsForBuilder: '',
+      findings: [{
+        priority: 'P2', area: 'run-supervisor',
+        finding: 'The cost ceiling is evaluated after the usage row is written.',
+        predictedFailure: 'A run at 99% of ceiling writes one more update.',
+        evidence: 'src/server/example-module.ts:112', proposedFix: 'Evaluate the ceiling before persisting.',
+      }],
+    });
+    // A real user of this platform, with no grant on this project's venture —
+    // the same fixture shape work-api.test.ts uses for its access-denial test.
+    const outsider = database.identity.createUser({ displayName: 'Outsider', role: 'staff' });
+    app = buildApp({ database, invoke: async () => 'unused', currentUserId: outsider.id });
+    return {
+      gateId: 'G1' as const,
+      findingId: filed.review.findings[0]!.id,
+      builderId: builder.id,
+      reviewerId: reviewer.id,
+    };
+  }
+
   it('returns the seal state, with its reason, for a half-filed gate', async () => {
     const { cardId } = seedHalfFiledGate();
     const response = await app!.inject({
@@ -155,5 +192,53 @@ describe('the governance API', () => {
     });
     const entries = response.json().entries as Array<{ supersededById: string | null }>;
     expect(entries.some((entry) => entry.supersededById !== null)).toBe(true);
+  });
+
+  it('REFUSES to adjudicate a finding on a card in a venture the actor cannot reach', async () => {
+    const { gateId, findingId, builderId } = seedFindingInInaccessibleVenture();
+
+    const response = await app!.inject({
+      method: 'POST',
+      url: `/api/findings/${findingId}/adjudicate`,
+      payload: { gateId, outcome: 'adopted', reason: 'Fine.', ruledByOrgAgentId: builderId },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toContain('Access denied');
+  });
+
+  it('REFUSES to contest a finding on a card in a venture the actor cannot reach', async () => {
+    const { findingId, reviewerId } = seedFindingInInaccessibleVenture();
+
+    const response = await app!.inject({
+      method: 'POST',
+      url: `/api/findings/${findingId}/contest`,
+      payload: { contestedByOrgAgentId: reviewerId, newEvidence: 'It is not harmless.' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toContain('Access denied');
+  });
+
+  it('gives an unknown finding id the same response as an inaccessible one', async () => {
+    const { gateId, findingId, builderId } = seedFindingInInaccessibleVenture();
+    const payload = { gateId, outcome: 'adopted', reason: 'Fine.', ruledByOrgAgentId: builderId };
+
+    const inaccessible = await app!.inject({
+      method: 'POST', url: `/api/findings/${findingId}/adjudicate`, payload,
+    });
+    const unknown = await app!.inject({
+      method: 'POST', url: '/api/findings/finding-does-not-exist/adjudicate', payload,
+    });
+
+    // Both refuse with the same shape: 403, "Access denied: finding <id>".
+    // Neither response says "card" — that wording is exactly what would let
+    // a caller tell "no such finding" apart from "finding exists, wrong
+    // venture", which is what would let the API be used to discover which
+    // findings exist.
+    expect(unknown.statusCode).toBe(403);
+    expect(inaccessible.statusCode).toBe(403);
+    expect(unknown.json().error).toMatch(/^Access denied: finding /);
+    expect(inaccessible.json().error).toMatch(/^Access denied: finding /);
   });
 });
