@@ -71,6 +71,12 @@ function stubRoutes(overrides: Record<string, () => Promise<Response>> = {}) {
     if (url === '/api/cards/card-1') return jsonResponse({ card, room: null, activity, artifacts, runs: [] });
     if (url === '/api/cards/card-1/specification') return jsonResponse(specification);
     if (url === '/api/projects/project-1/cards') return jsonResponse(board);
+    // EscalationBanner is mounted unconditionally (Task 8) — it checks every
+    // card, gate or no gate, since a card an open P0 already blocked has no
+    // gate left to check instead (src/server/work-repository.ts's moveCard
+    // clears gateId on a move to 'blocked'). None of this file's fixtures
+    // carry an open escalation, so the quiet, no-render answer throughout.
+    if (url === '/api/escalations?cardId=card-1') return jsonResponse({ escalations: [] });
     if (key === 'PUT /api/cards/card-1/notes') {
       const { notes } = JSON.parse(String(init?.body)) as { notes: string };
       return jsonResponse({ ...card, ownerNotes: notes });

@@ -10,6 +10,9 @@ import {
 } from '../api/client.js';
 import { SPECIFICATION_SECTIONS, type CardSpecification } from '../../shared/governance.js';
 import type { BoardColumn, BoardColumnKey } from '../../shared/work.js';
+import { EscalationBanner } from './EscalationBanner.js';
+import { FindingsPanel } from './FindingsPanel.js';
+import { ReviewPanel } from './ReviewPanel.js';
 import { RunPanel } from './RunPanel.js';
 
 export interface CardDetailViewProps {
@@ -161,6 +164,16 @@ export function CardDetailView({ cardId, onClose, onMoved }: CardDetailViewProps
         {loadState === 'error' && <div className="error-banner" role="alert">{loadError}</div>}
         {loadState === 'ready' && detail && (
           <>
+            {/*
+              Unconditional, and first: a card carrying an open P0 has already
+              been moved to 'blocked', which clears gateId to null
+              (src/server/work-repository.ts's moveCard) — gating this on the
+              gate the way Review/Findings below are gated would hide it on
+              exactly the card it exists to speak for. It renders nothing of
+              its own when there is nothing to say.
+            */}
+            <EscalationBanner cardId={cardId} />
+
             <div className="detail-meta">
               <span className={`status-dot status-${detail.card.status}`} />
               <span className="detail-status-label">{humanize(detail.card.status)}</span>
@@ -233,6 +246,31 @@ export function CardDetailView({ cardId, onClose, onMoved }: CardDetailViewProps
                 </button>
               </div>
             </section>
+
+            {/*
+              Meaningful only while the card sits at a gate (Card.gateId is
+              null otherwise — src/shared/work.ts). Unlike EscalationBanner
+              above, there is no route that takes just a cardId here: both
+              endpoints these panels call are keyed by cardId AND gateId, so
+              there is nothing to fetch without one.
+            */}
+            {detail.card.gateId && (
+              <>
+                <section className="detail-section">
+                  <h3 className="detail-heading">Review</h3>
+                  <ReviewPanel cardId={cardId} gateId={detail.card.gateId} />
+                </section>
+
+                <section className="detail-section">
+                  <h3 className="detail-heading">Findings</h3>
+                  <FindingsPanel
+                    assigneeOrgAgentId={detail.card.assigneeOrgAgentId}
+                    cardId={cardId}
+                    gateId={detail.card.gateId}
+                  />
+                </section>
+              </>
+            )}
 
             <section className="detail-section">
               <h3 className="detail-heading">Run</h3>

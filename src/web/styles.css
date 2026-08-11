@@ -421,3 +421,63 @@ button { color: inherit; }
    separates the "start a new run" region from whatever this panel is
    already watching, on the panel's own grid gap rather than an added margin. */
 .run-start { border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+
+/* Review panel — the blind-review ladder inside the card detail dialog.
+   Blindness is a structural fact, not a status verdict, so the seal block
+   stays neutral (Rule Hairline + Veil 02 — the same "important without a
+   tint" language .run-permission already uses above) rather than borrowing a
+   status hue that does not describe it: DESIGN.md's Neutral Record Rule, "a
+   panel earns importance with position, rule weight and type, not a tint." */
+.review-panel { display: grid; gap: 12px; }
+.review-progress { margin: 0; color: var(--quiet); font: 500 10px var(--font-mono); letter-spacing: .02em; }
+.review-seal { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); }
+.review-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.review-row { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.review-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.review-checklist { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--secondary); }
+
+/* Findings panel — the P0-P4 ladder, with adopt / defer / override controls.
+   .finding-priority-p0 is the one rung that also takes colour: P0 is not
+   only the hardest priority but a state DESIGN.md names explicitly under
+   Breach Red ("blocked, failed, error, and the P0 stop"), so it is the one
+   place a finding takes a tint, mirroring .run-status's own neutral-base-
+   plus-one-state-override pattern above. P1-P4 stay the plain, neutral
+   .card-pill they are laid on top of, same as every other priority in this
+   system that is a degree rather than a status. */
+.finding-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.finding-row { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.finding-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.finding-priority-p0 { background: rgba(226,92,92,.14); color: #ffc4c4; }
+
+/* Escalation banner — the one place Breach Red is allowed to interrupt
+   (DESIGN.md: "the only colour permitted to interrupt"). The surface reuses
+   .error-banner verbatim (the same object as any other refused/invalid
+   state, just the most consequential instance of it, the way .board-unplaced
+   already reuses it above); this class adds only what .error-banner does not
+   carry — a heading, per-escalation rows and the resolve form. Text colour
+   is inherited from .error-banner throughout rather than restated. */
+.escalation-banner { display: grid; gap: 12px; padding: 16px; }
+.escalation-text { margin: 0; font-size: 13px; line-height: 1.5; }
+.escalation-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.escalation-row { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid rgba(240,90,90,.25); }
+.escalation-row:first-child { padding-top: 0; border-top: 0; }
+.escalation-meta { margin: 0; font: 500 10px var(--font-mono); letter-spacing: .02em; }
+.escalation-resolve { display: grid; gap: 8px; }
+
+/* Override register — read-only, append-only, so nothing here is styled as
+   an affordance to edit. Rows reuse the same ledger-row language as
+   .spec-row/.activity-row above; "Superseded" is a plain .card-pill, neutral
+   like every other metadata marker, because supersession is a recorded fact
+   about the entry, not a breach or a warning. */
+.override-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.override-row { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); }
+.override-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* Adjudication report — eight fixed sections, always rendered, each a small
+   ledger of its own lines (or the shared "nothing recorded" placeholder).
+   Reuses .detail-section/.detail-heading for structure and the same row
+   language as .spec-row/.activity-row for each line. */
+.report-controls { display: flex; align-items: center; gap: 10px; }
+.report-sections { display: grid; gap: 20px; }
+.report-lines { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.report-line { margin: 0; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.015); color: var(--secondary); font-size: 13px; line-height: 1.5; }
