@@ -11,6 +11,7 @@ import type { OrchestratorDatabase } from './database.js';
 import { createHierarchyOrchestrator } from './hierarchy.js';
 import { registerPlatformApi, type ExportFailureLogger } from './platform-api.js';
 import { registerWorkApi } from './work-api.js';
+import { registerGovernanceApi } from './governance-api.js';
 import { probeAgentRuntimes } from './runtime-health.js';
 import type { PlatformEvent } from '../shared/platform.js';
 
@@ -373,6 +374,7 @@ export function buildApp({
   });
 
   registerWorkApi(app, database, { currentUserId, supervisor });
+  registerGovernanceApi(app, database, { currentUserId });
 
   if (supervisor) {
     // Registered last so the plugin is in place before the route it serves.
