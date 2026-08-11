@@ -10,6 +10,7 @@ import {
 } from '../api/client.js';
 import { SPECIFICATION_SECTIONS, type CardSpecification } from '../../shared/governance.js';
 import type { BoardColumn, BoardColumnKey } from '../../shared/work.js';
+import { RunPanel } from './RunPanel.js';
 
 export interface CardDetailViewProps {
   cardId: string;
@@ -134,6 +135,18 @@ export function CardDetailView({ cardId, onClose, onMoved }: CardDetailViewProps
     }
   }
 
+  // The run this dialog opens showing: whichever is still running, else the
+  // one most recently started (`listRunsForCard` orders by `started_at`, so
+  // the last element is the newest — src/server/run-repository.ts), else
+  // none. A card runs at most one agent turn at a time in practice, but this
+  // does not assume that — it is a preference order over whatever the server
+  // actually sent, not a count.
+  const currentRun = detail
+    ? detail.runs.find((candidate) => candidate.status === 'running')
+      ?? detail.runs[detail.runs.length - 1]
+      ?? null
+    : null;
+
   return (
     <ModalDialog labelledBy={titleId} onClose={onClose}>
       <div className="dialog-heading">
@@ -219,6 +232,16 @@ export function CardDetailView({ cardId, onClose, onMoved }: CardDetailViewProps
                   {moveState === 'moving' ? 'Moving…' : moveState === 'moved' ? 'Moved ✓' : 'Move'}
                 </button>
               </div>
+            </section>
+
+            <section className="detail-section">
+              <h3 className="detail-heading">Run</h3>
+              <RunPanel
+                assigneeOrgAgentId={detail.card.assigneeOrgAgentId}
+                cardId={cardId}
+                run={currentRun}
+                runId={currentRun?.id ?? null}
+              />
             </section>
 
             <section className="detail-section">
