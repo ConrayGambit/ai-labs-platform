@@ -70,7 +70,19 @@ export function registerWorkApi(
     // An unknown card and an inaccessible one give the same answer, so the API
     // cannot be used to discover which cards exist.
     if (!card) throw new Error(`Access denied: card ${cardId}`);
-    assertProjectAccess(card.projectId);
+    /*
+     * assertProjectAccess can let assertVentureAccess's own message escape —
+     * `Access denied: u-7 may not reach venture v-3` — and left unwrapped it
+     * reads differently from the unknown-card branch above. Same 403 either
+     * way, but different bodies, and a caller comparing them can tell "no
+     * such card" from "that card exists, and here is its venture id", which
+     * is exactly the oracle deny-by-default exists to close.
+     */
+    try {
+      assertProjectAccess(card.projectId);
+    } catch {
+      throw new Error(`Access denied: card ${cardId}`);
+    }
     return card;
   };
 
@@ -144,7 +156,15 @@ export function registerWorkApi(
         ? database.governance.requiredReviewers(card.id, card.gateId)
         : 0,
       evidence: {
-        reviewsFiled: 0,
+        // Distinct reviewers whose review currently stands, the same way
+        // getGateSealState counts them. Counting rows instead would let one
+        // reviewer satisfy a two-reviewer gate by filing twice.
+        reviewsFiled: card.gateId
+          ? new Set(
+            database.governance.listCurrentReviews(card.id, card.gateId)
+              .map((review) => review.reviewerOrgAgentId),
+          ).size
+          : 0,
         ownerDecision: false,
         artifactCount: database.work.listArtifacts(card.id).length,
         missingSpecificationSections: database.governance.missingSpecificationSections(card.id),
