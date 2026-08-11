@@ -61,6 +61,16 @@ export interface RuntimeHealth {
   available: boolean;
   version: string | null;
   error: string | null;
+  /**
+   * True only when the probe hit its bound before the runtime's process
+   * answered. `available` stays false either way - a runtime that did not
+   * answer in time is not usable right now, and that is the more important
+   * fact - but a slow runtime is not the same problem as one whose
+   * executable is not there, and a caller must be able to tell them apart
+   * without parsing `error`'s free text. Always false when `available` is
+   * true.
+   */
+  timedOut: boolean;
   checkedAt: string;
 }
 
