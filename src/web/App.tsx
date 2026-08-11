@@ -18,6 +18,8 @@ import type {
   TaskStatus,
 } from '../shared/domain.js';
 import { RequestFailedError } from './idempotency.js';
+import { CardBoardView } from './views/CardBoardView.js';
+import { CardDetailView } from './views/CardDetailView.js';
 
 type RuntimeOptionsPatch = {
   optionTemplates?: AgentRuntime['optionTemplates'];
@@ -53,7 +55,7 @@ const EMPTY_BOARD: KanbanBoard = {
   blocked: [],
 };
 
-type View = 'dashboard' | 'organizations' | 'organization' | 'skills' | 'runtimes';
+type View = 'dashboard' | 'organizations' | 'organization' | 'cards' | 'skills' | 'runtimes';
 type OrgTab = 'board' | 'team';
 
 async function getJson<T>(url: string): Promise<T> {
@@ -1162,6 +1164,7 @@ export function App() {
   const [orgTab, setOrgTab] = useState<OrgTab>('board');
   const [board, setBoard] = useState<KanbanBoard>(EMPTY_BOARD);
   const [view, setView] = useState<View>('dashboard');
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [showProjectCreate, setShowProjectCreate] = useState(false);
   const [showTaskCreate, setShowTaskCreate] = useState(false);
   const [showAgentCreate, setShowAgentCreate] = useState(false);
@@ -1313,9 +1316,11 @@ export function App() {
       ? 'Organizations'
       : view === 'organization'
         ? (selectedOrganization?.name ?? 'Organization')
-        : view === 'skills'
-          ? 'Skills'
-          : 'Runtime registry';
+        : view === 'cards'
+          ? 'Cards'
+          : view === 'skills'
+            ? 'Skills'
+            : 'Runtime registry';
 
   return (
     <div className="app-shell">
@@ -1330,6 +1335,9 @@ export function App() {
           </button>
           <button className={view === 'organizations' ? 'active' : ''} onClick={() => setView('organizations')} type="button">
             <span aria-hidden="true">▤</span> Organizations
+          </button>
+          <button className={view === 'cards' ? 'active' : ''} onClick={() => setView('cards')} type="button">
+            <span aria-hidden="true">▥</span> Cards
           </button>
           <button className={view === 'skills' ? 'active' : ''} onClick={() => setView('skills')} type="button">
             <span aria-hidden="true">✦</span> Skills
@@ -1441,6 +1449,16 @@ export function App() {
               onNewAgent={() => setShowAgentCreate(true)}
             />
           )}
+          {!loading && !error && view === 'cards' && (
+            selectedProjectId ? (
+              <CardBoardView projectId={selectedProjectId} onOpenCard={setSelectedCardId} />
+            ) : (
+              <div className="empty-state">
+                <strong>No project selected</strong>
+                <span>Register a project to see its governed board.</span>
+              </div>
+            )
+          )}
           {!loading && !error && view === 'skills' && <SkillsView skills={skills} />}
           {!loading && !error && view === 'runtimes' && (
             <RuntimesView runtimes={runtimes} onSaveOptions={saveRuntimeOptions} />
@@ -1477,6 +1495,9 @@ export function App() {
       )}
       {showOrganizationCreate && (
         <NewOrganizationDialog onClose={() => setShowOrganizationCreate(false)} onCreate={createOrganization} />
+      )}
+      {selectedCardId && (
+        <CardDetailView cardId={selectedCardId} onClose={() => setSelectedCardId(null)} />
       )}
     </div>
   );
