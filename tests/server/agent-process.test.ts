@@ -26,7 +26,13 @@ function fakeRuntime(argsTemplate: string[]): AgentRuntime {
     env: {},
     enabled: true,
     isCoordinator: false,
-    timeoutMs: 5_000,
+    // Comfortably above worst-case subprocess-spawn time under the full
+    // suite's parallelism (see the testTimeout/hookTimeout comment in
+    // vite.config.ts) — matches the timeoutMs convention already used by
+    // every other AgentRuntime fixture in this suite. This is a
+    // test-fixture value with no product meaning; real timeouts come
+    // from the runtime registry (src/server/database.ts).
+    timeoutMs: 120_000,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -37,7 +43,13 @@ describe('agent process adapter', () => {
 
   afterEach(() => {
     for (const directory of temporaryDirectories.splice(0)) {
-      rmSync(directory, { recursive: true, force: true });
+      // maxRetries/retryDelay ride out the brief window after the child
+      // (spawned with this directory as its cwd) exits, during which
+      // Windows can still hold the directory locked and rmSync throws
+      // EBUSY. `force` does not cover this — it only suppresses ENOENT.
+      // A genuine failure (e.g. a permissions error) still throws once
+      // retries are exhausted.
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 

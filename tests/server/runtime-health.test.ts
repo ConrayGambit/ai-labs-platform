@@ -21,7 +21,14 @@ function runtime(command: string, versionArgs: string[] = ['--version']): AgentR
     env: {},
     enabled: true,
     isCoordinator: false,
-    timeoutMs: 5_000,
+    // Raised to match the timeoutMs convention already used by every
+    // other AgentRuntime fixture in this suite (see agent-process.test.ts).
+    // NOTE: unlike runAgentProcess, probeAgentRuntime never reads
+    // runtime.timeoutMs — it bounds its own spawn with the PROBE_TIMEOUT_MS
+    // constant in src/server/runtime-health.ts (product code, so it is
+    // out of scope here). This field is fixture-shape hygiene only; the
+    // probe test below can still time out under heavy parallel load.
+    timeoutMs: 120_000,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
